@@ -32,7 +32,7 @@ TICKER_SELECTION: Dict[str, Tuple[str, str, str]] = {
     "10": ("0QPS.LON", "GIVAUDAN ORD SHS", "London Stock Exchange"),
     "11": ("0A0D.LON", "ALCON ORD SHS", "London Stock Exchange"),
     "12": ("0Z4C.LON", "SIKA ORD SHS", "London Stock Exchange"),
-    "13": ("0Q0Q.LON", "PARTNERS GROUP HOLDING ORD SHS", "London Stock Exchange"),
+    "13": ("0QOQ.LON", "PARTNERS GROUP HOLDING ORD SHS", "London Stock Exchange"),
     "14": ("0QMG.LON", "SWISS LIFE HOLDING ORD SHS", "London Stock Exchange"),
     "15": ("AMRZ", "Amrize Ltd Ordinary Shares", "US Stock Exchange"),
     "16": ("0QQ2.LON", "GEBERIT ORD SHS	", "London Stock Exchange"),
