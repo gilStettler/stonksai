@@ -1,0 +1,41 @@
+================================================================================
+ALPHAVANTAGE DATA ANALYSIS - SUMMARY
+================================================================================
+
+Analysis date: 2025-11-21 16:49:08
+Number of stocks analyzed: 18
+
+--------------------------------------------------------------------------------
+OVERALL STATISTICS
+--------------------------------------------------------------------------------
+Total data points: 51,027
+Average data points per stock: 2,835
+Longest timespan: 24.62 years (ABBNY)
+Shortest timespan: 0.41 years (AMRZ)
+Highest volatility: 2810.93% (RHO6.FRK)
+Lowest volatility: 3.91% (AMRZ)
+
+--------------------------------------------------------------------------------
+STOCK OVERVIEW (sorted by timespan)
+--------------------------------------------------------------------------------
+
+ABB Ltd                             (ABBNY       ) |  24.62 years |  6,194 points | Vol:  58.10%
+Zurich Insurance Group AG           (0QP2.LON    ) |  20.88 years |  3,790 points | Vol:  28.06%
+Roche Holding Ltd                   (RHO6.FRK    ) |  20.88 years |  5,318 points | Vol: 2810.93%
+Holcim Ltd                          (0QKY.LON    ) |  19.73 years |  2,722 points | Vol:  31.11%
+Lonza Group AG                      (0QNO.LON    ) |  19.71 years |  2,434 points | Vol:  43.16%
+Novartis AG                         (0QLR.LON    ) |  19.70 years |  3,405 points | Vol:  20.77%
+Swisscom AG                         (0QKI.LON    ) |  19.66 years |  2,511 points | Vol:  12.06%
+Swiss Life Holding AG               (0QMG.LON    ) |  19.65 years |  2,365 points | Vol:  36.00%
+Givaudan SA                         (0QPS.LON    ) |  19.62 years |  2,734 points | Vol:  35.19%
+Nestlé SA                           (NSRGY       ) |  18.36 years |  4,612 points | Vol:  30.29%
+Logitech International SA           (0QK6.LON    ) |  11.70 years |  2,137 points | Vol:  38.26%
+Geberit AG                          (0QQ2.LON    ) |  11.66 years |  2,224 points | Vol:  18.67%
+Sika AG                             (0Z4C.LON    ) |  11.63 years |  2,068 points | Vol: 210.34%
+Partners Group Holding AG           (0QOQ.LON    ) |  11.60 years |  2,162 points | Vol:  29.09%
+Kühne & Nagel AG                    (0QMW.LON    ) |  11.51 years |  2,234 points | Vol:  28.23%
+UBS Group AG                        (UBS         ) |  11.00 years |  2,766 points | Vol:  37.02%
+Alcon AG                            (0A0D.LON    ) |   6.60 years |  1,244 points | Vol:  10.56%
+Amrize Ltd                          (AMRZ        ) |   0.41 years |    107 points | Vol:   3.91%
+
+================================================================================
