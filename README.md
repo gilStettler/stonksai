@@ -22,7 +22,7 @@ Project StonksAI for Module SAI1 at BFH
 | SIKA ORD SHS                                  | 0Z4C.LON                         | [London](https://www.londonstockexchange.com/market-stock/0Z4C/sika-ag/overview)                           |
 | PARTNERS GROUP HOLDING ORD SHS                | 0Q0Q.LON                         | [London](https://www.londonstockexchange.com/market-stock/0QOQ/partners-group-holding-ag/overview)         |
 | SWISS LIFE HOLDING ORD SHS                    | 0QMG.LON                         | [London](https://www.londonstockexchange.com/market-stock/0QMG/swiss-life-holding-ag/overview)             |
-| Amrize Ltd Ordinary Shares                    | AMRZ                             | [US](https://www.nasdaq.com/market-activity/stocks/amrz)                                                   |
+| Nicht zu berücksichtigen, da wir nicht genügend Daten haben. // Amrize Ltd Ordinary Shares                    | AMRZ                             | [US](https://www.nasdaq.com/market-activity/stocks/amrz)                                                   |
 | GEBERIT ORD SHS                               | 0QQ2.LON                         | [London](https://www.londonstockexchange.com/market-stock/0QQ2/geberit-ag/overview)                        |
 | KUEHNE & NAGEL ORD SHS                        | 0QMW.LON                         | [London](https://www.londonstockexchange.com/market-stock/0QMW/kuehne-und-nagel-international-ag/overview) |
 | LOGITECH INTERNATIONAL ORD SHS                | 0QK6.LON                         | [London](https://www.londonstockexchange.com/market-stock/0QK6/logitech-international-sa/overview)         |
