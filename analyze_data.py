@@ -10,6 +10,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+from statsmodels.tsa.seasonal import seasonal_decompose
 
 # Configuration
 DATA_DIR = "alphavantage_data"
@@ -53,6 +54,14 @@ def load_all_data():
         try:
             df = pd.read_csv(file_path)
             df['date'] = pd.to_datetime(df['date'])
+            
+            # Filter for data from 2020 onwards
+            df = df[df['date'] >= '2020-01-01']
+            
+            if df.empty:
+                print(f"⚠ Skipped: {ticker} (no data from 2020 onwards)")
+                continue
+                
             df = df.sort_values('date')
             all_data[ticker] = df
             print(f"✓ Loaded: {ticker} ({len(df)} rows)")
@@ -236,6 +245,9 @@ def analyze_correlations(all_data):
     
     correlation_df = pd.DataFrame(price_data)
     
+    # Rename columns/index to company names
+    correlation_df.columns = [TICKER_TO_COMPANY.get(t, t) for t in correlation_df.columns]
+    
     # Calculate correlation matrix
     corr_matrix = correlation_df.corr()
     
@@ -245,12 +257,123 @@ def analyze_correlations(all_data):
     
     # Visualize correlation matrix
     plt.figure(figsize=(14, 12))
+    
+    # Create mask for upper triangle
+    mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+    
     sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap='coolwarm', 
-                center=0, square=True, linewidths=1, cbar_kws={"shrink": 0.8})
+                center=0, square=True, linewidths=1, cbar_kws={"shrink": 0.8},
+                mask=mask)
     plt.title('Correlation Matrix of Stock Prices')
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, "correlation_matrix.png"), dpi=300, bbox_inches='tight')
     print("✓ Saved: correlation_matrix.png")
+    plt.close()
+
+def analyze_decomposition(all_data):
+    """Analyzes time series decomposition (Trend, Seasonality, Residuals)"""
+    
+    print("\n" + "="*80)
+    print("DECOMPOSITION ANALYSIS")
+    print("="*80 + "\n")
+    
+    # Filter for stocks with enough data (at least 2 years approx for good seasonality)
+    # Using period=252 for daily data (approx 1 trading year)
+    period = 252
+    
+    valid_stocks = {}
+    for ticker, df in all_data.items():
+        if len(df) > period * 2:
+            valid_stocks[ticker] = df
+    
+    if not valid_stocks:
+        print("⚠ Not enough data for decomposition analysis (need > 2 years)")
+        return
+
+    print(f"Performing decomposition for {len(valid_stocks)} stocks...")
+    
+    # Create a figure with 4 subplots
+    fig, axes = plt.subplots(4, 1, figsize=(16, 20), sharex=True)
+    
+    # Colors for different stocks
+    colors = plt.cm.tab20(np.linspace(0, 1, len(valid_stocks)))
+    
+    for i, (ticker, df) in enumerate(valid_stocks.items()):
+        company_name = TICKER_TO_COMPANY.get(ticker, ticker)
+        
+        # Ensure index is datetime and sorted
+        ts = df.set_index('date')['close'].asfreq('B') # Business days
+        ts = ts.fillna(method='ffill') # Fill missing business days
+        
+        try:
+            # Multiplicative model usually better for stock prices (variance increases with level)
+            # But additive is more robust if there are zeros or negatives (unlikely here)
+            # Using additive for simplicity in visualization overlay, or multiplicative?
+            # Let's use additive for visualization stability across many stocks
+            result = seasonal_decompose(ts, model='additive', period=period)
+            
+            # Normalize components for comparison? 
+            # Or just plot raw values? Raw values might be hard to compare if prices vary wildly.
+            # Let's normalize trend and observed to start at 100.
+            # Seasonality and resid will be relative.
+            
+            # Actually, user asked for "all stocks together in one graphic".
+            # Normalized is best for Trend/Observed.
+            
+            start_val = result.trend.dropna().iloc[0]
+            if start_val == 0: start_val = 1
+            
+            norm_trend = (result.trend / start_val) * 100
+            
+            # Plot Trend
+            axes[0].plot(result.trend.index, norm_trend, label=company_name, color=colors[i], alpha=0.8)
+            
+            # Plot Seasonality (not normalized, but maybe scaled?)
+            # Seasonality in additive model is absolute value. 
+            # If we want to compare, maybe % of price?
+            # Let's stick to raw additive seasonality for now, but it might be messy.
+            # Alternative: Decompose Log prices -> Additive becomes Multiplicative equivalent.
+            # Let's try decomposing Log prices for better comparability?
+            # No, let's stick to simple additive but maybe just plot it.
+            # If prices range from 10 to 1000, additive seasonality will be huge for 1000.
+            # Let's normalize seasonality by dividing by trend? -> effectively multiplicative
+            
+            axes[1].plot(result.seasonal.index, result.seasonal, label=company_name, color=colors[i], alpha=0.5)
+            
+            # Plot Residuals
+            axes[2].plot(result.resid.index, result.resid, label=company_name, color=colors[i], alpha=0.5)
+            
+            # Plot Observed (Normalized)
+            norm_observed = (ts / ts.iloc[0]) * 100
+            axes[3].plot(ts.index, norm_observed, label=company_name, color=colors[i], alpha=0.8)
+            
+        except Exception as e:
+            print(f"⚠ Could not decompose {ticker}: {e}")
+            continue
+
+    axes[0].set_title('Trend Component (Normalized, Start=100)')
+    axes[0].grid(True, alpha=0.3)
+    # axes[0].legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small')
+    
+    axes[1].set_title('Seasonal Component (Additive)')
+    axes[1].grid(True, alpha=0.3)
+    
+    axes[2].set_title('Residuals')
+    axes[2].grid(True, alpha=0.3)
+    
+    axes[3].set_title('Observed Data (Normalized, Start=100)')
+    axes[3].grid(True, alpha=0.3)
+    
+    # Add single legend to the right
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='center right', bbox_to_anchor=(1.1, 0.5))
+    
+    plt.tight_layout()
+    # Adjust layout to make room for legend
+    plt.subplots_adjust(right=0.85)
+    
+    plt.savefig(os.path.join(OUTPUT_DIR, "decomposition_analysis.png"), dpi=300, bbox_inches='tight')
+    print("✓ Saved: decomposition_analysis.png")
     plt.close()
 
 def generate_summary_report(stats_df):
@@ -313,6 +436,9 @@ def main():
     
     # 4. Analyze correlations
     analyze_correlations(all_data)
+
+    # 5. Analyze decomposition
+    analyze_decomposition(all_data)
     
     # 5. Create visualizations
     create_visualizations(all_data, stats_df)
@@ -334,7 +460,8 @@ def main():
     print("  - top_volume.png")
     print("  - temporal_coverage.png")
     print("  - correlation_matrix.csv")
-    print("  - correlation_matrix.png\n")
+    print("  - correlation_matrix.png")
+    print("  - decomposition_analysis.png\n")
 
 if __name__ == "__main__":
     main()
