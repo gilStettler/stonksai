@@ -2,40 +2,39 @@
 ALPHAVANTAGE DATA ANALYSIS - SUMMARY
 ================================================================================
 
-Analysis date: 2025-11-23 15:12:49
-Number of stocks analyzed: 18
+Analysis date: 2025-11-23 15:33:27
+Number of stocks analyzed: 17
 
 --------------------------------------------------------------------------------
 OVERALL STATISTICS
 --------------------------------------------------------------------------------
-Total data points: 24,497
-Average data points per stock: 1,361
+Total data points: 24,390
+Average data points per stock: 1,435
 Longest timespan: 5.88 years (0QK6.LON)
-Shortest timespan: 0.41 years (AMRZ)
+Shortest timespan: 5.83 years (0A0D.LON)
 Highest volatility: 38.1% (UBS)
-Lowest volatility: 3.91% (AMRZ)
+Lowest volatility: 6.31% (0QKI.LON)
 
 --------------------------------------------------------------------------------
 STOCK OVERVIEW (sorted by timespan)
 --------------------------------------------------------------------------------
 
 Logitech International SA           (0QK6.LON    ) |   5.88 years |  1,461 points | Vol:  24.12%
+Zurich Insurance Group AG           (0QP2.LON    ) |   5.88 years |  1,466 points | Vol:  17.09%
 Swisscom AG                         (0QKI.LON    ) |   5.88 years |  1,466 points | Vol:   6.31%
-Givaudan SA                         (0QPS.LON    ) |   5.88 years |  1,466 points | Vol:  14.16%
 Holcim Ltd                          (0QKY.LON    ) |   5.88 years |  1,276 points | Vol:  26.48%
 Novartis AG                         (0QLR.LON    ) |   5.88 years |  1,289 points | Vol:  10.73%
 Swiss Life Holding AG               (0QMG.LON    ) |   5.88 years |  1,465 points | Vol:  25.49%
 Kühne & Nagel AG                    (0QMW.LON    ) |   5.88 years |  1,465 points | Vol:  21.70%
 Lonza Group AG                      (0QNO.LON    ) |   5.88 years |  1,467 points | Vol:  16.88%
 Partners Group Holding AG           (0QOQ.LON    ) |   5.88 years |  1,466 points | Vol:  20.44%
-Zurich Insurance Group AG           (0QP2.LON    ) |   5.88 years |  1,466 points | Vol:  17.09%
-Nestlé SA                           (NSRGY       ) |   5.88 years |  1,481 points | Vol:  10.70%
+ABB Ltd                             (ABBNY       ) |   5.88 years |  1,481 points | Vol:  34.64%
+Givaudan SA                         (0QPS.LON    ) |   5.88 years |  1,466 points | Vol:  14.16%
 Geberit AG                          (0QQ2.LON    ) |   5.88 years |  1,464 points | Vol:  14.99%
 Sika AG                             (0Z4C.LON    ) |   5.88 years |  1,465 points | Vol:  18.69%
-ABB Ltd                             (ABBNY       ) |   5.88 years |  1,481 points | Vol:  34.64%
-UBS Group AG                        (UBS         ) |   5.88 years |  1,481 points | Vol:  38.10%
 Roche Holding Ltd                   (RHO6.FRK    ) |   5.88 years |  1,503 points | Vol:  10.41%
+Nestlé SA                           (NSRGY       ) |   5.88 years |  1,481 points | Vol:  10.70%
+UBS Group AG                        (UBS         ) |   5.88 years |  1,481 points | Vol:  38.10%
 Alcon AG                            (0A0D.LON    ) |   5.83 years |  1,228 points | Vol:  10.42%
-Amrize Ltd                          (AMRZ        ) |   0.41 years |    107 points | Vol:   3.91%
 
 ================================================================================

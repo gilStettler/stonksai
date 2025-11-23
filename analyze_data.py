@@ -51,6 +51,10 @@ def load_all_data():
         # Extract ticker symbol from filename
         ticker = os.path.basename(file_path).replace("_daily_data.csv", "")
         
+        # Exclude Amrize (insufficient data)
+        if ticker == 'AMRZ':
+            continue
+            
         try:
             df = pd.read_csv(file_path)
             df['date'] = pd.to_datetime(df['date'])
