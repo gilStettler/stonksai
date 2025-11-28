@@ -1,1 +1,4 @@
-"ALPHAVANTAGE_API_KEY" = "your api key"
+ALPHAVANTAGE_API_KEY = "your api key"
+ALPHAVANTAGE_PREMIUM_API_KEY = "your api key"
+
+FRED_API_KEY = "your api key"
