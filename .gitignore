@@ -1,1 +1,47 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
 venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.pytest_cache/
+.mypy_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+
+# Environment variables
+.env
+
+# Large Data & Models (optional, but recommended to avoid bloating repo)
+# Uncomment if you want to exclude data
+# alphavantage_data/
+# data_fred/
+
+# Model Checkpoints (too large for git)
+daily_results/models/
+chronos-2-finetuned/
+chronos-2-test/
+finetuning/
+experiments_daily_volatility/production_finetuning_fast/
+*.safetensors
+
+# System
+.DS_Store
+Thumbs.db

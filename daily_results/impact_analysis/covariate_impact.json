@@ -1,0 +1,26 @@
+[
+  {
+    "covariate_group":"VIX",
+    "baseline_mae":0.0107787871,
+    "augmented_mae":0.0108172303,
+    "impact_pct":-0.3566557525,
+    "mae_std":0.0028334626,
+    "n_stocks":15
+  },
+  {
+    "covariate_group":"FRED (fedfunds, t10y2y)",
+    "baseline_mae":0.0108172303,
+    "augmented_mae":0.0107639908,
+    "impact_pct":0.4921724522,
+    "mae_std":0.002811095,
+    "n_stocks":15
+  },
+  {
+    "covariate_group":"Cross-Stock Correlations",
+    "baseline_mae":0.0107639908,
+    "augmented_mae":0.0107624723,
+    "impact_pct":0.014107709,
+    "mae_std":0.0028118294,
+    "n_stocks":15
+  }
+]
