@@ -1,0 +1,248 @@
+{
+  "baseline": [
+    {
+      "ticker": "NESN.SW",
+      "name": "Nestl\u00e9",
+      "model": "baseline",
+      "mae": 0.3122052150438703,
+      "rmse": 0.42271695056769043,
+      "mape": 5.176062583286057,
+      "n_test": 1315
+    },
+    {
+      "ticker": "NOVN.SW",
+      "name": "Novartis",
+      "model": "baseline",
+      "mae": 0.3384317038818097,
+      "rmse": 0.4150707005033864,
+      "mape": 5.747945538079073,
+      "n_test": 355
+    },
+    {
+      "ticker": "ROG.SW",
+      "name": "Roche",
+      "model": "baseline",
+      "mae": 0.2708642452689367,
+      "rmse": 0.34336650331290186,
+      "mape": 4.6039691253208614,
+      "n_test": 355
+    },
+    {
+      "ticker": "ABBN.SW",
+      "name": "ABB",
+      "model": "baseline",
+      "mae": 0.31619930170868943,
+      "rmse": 0.4210211736197972,
+      "mape": 5.519250692784572,
+      "n_test": 355
+    },
+    {
+      "ticker": "SIKA.SW",
+      "name": "Sika",
+      "model": "baseline",
+      "mae": 0.34006242668142556,
+      "rmse": 0.5018060839416797,
+      "mape": 6.270249015245318,
+      "n_test": 355
+    },
+    {
+      "ticker": "UBSG.SW",
+      "name": "UBS",
+      "model": "baseline",
+      "mae": 0.4502655506420063,
+      "rmse": 0.551773691241929,
+      "mape": 7.59774196584449,
+      "n_test": 360
+    },
+    {
+      "ticker": "ZURN.SW",
+      "name": "Zurich",
+      "model": "baseline",
+      "mae": 0.273559221300903,
+      "rmse": 0.37627056658001207,
+      "mape": 4.428119589676336,
+      "n_test": 359
+    },
+    {
+      "ticker": "GIVN.SW",
+      "name": "Givaudan",
+      "model": "baseline",
+      "mae": 0.3121576017377391,
+      "rmse": 0.43157049678967874,
+      "mape": 5.366516342577633,
+      "n_test": 348
+    },
+    {
+      "ticker": "CFR.SW",
+      "name": "Richemont",
+      "model": "baseline",
+      "mae": 0.5491672443355732,
+      "rmse": 0.6509986907668407,
+      "mape": 9.325584090350032,
+      "n_test": 347
+    },
+    {
+      "ticker": "UHR.SW",
+      "name": "Swatch",
+      "model": "baseline",
+      "mae": 0.2935807255030475,
+      "rmse": 0.4161466966890464,
+      "mape": 5.190845108320636,
+      "n_test": 359
+    },
+    {
+      "ticker": "SCMN.SW",
+      "name": "Swisscom",
+      "model": "baseline",
+      "mae": 0.3140044370814138,
+      "rmse": 0.40908332138867176,
+      "mape": 5.136229933799252,
+      "n_test": 1224
+    },
+    {
+      "ticker": "ADEN.SW",
+      "name": "Adecco",
+      "model": "baseline",
+      "mae": 0.36224156753846265,
+      "rmse": 0.48840008517656,
+      "mape": 7.346581215376756,
+      "n_test": 1229
+    },
+    {
+      "ticker": "SGSN.SW",
+      "name": "SGS",
+      "model": "baseline",
+      "mae": 0.3366496374059495,
+      "rmse": 0.44224076650269123,
+      "mape": 5.50539322889073,
+      "n_test": 359
+    }
+  ],
+  "finetuned": [
+    {
+      "ticker": "NESN.SW",
+      "name": "Nestl\u00e9",
+      "model": "finetuned",
+      "mae": 0.31414200787912844,
+      "rmse": 0.42619070266723896,
+      "mape": 5.210643588685834,
+      "n_test": 1315
+    },
+    {
+      "ticker": "NOVN.SW",
+      "name": "Novartis",
+      "model": "finetuned",
+      "mae": 0.3372440908214091,
+      "rmse": 0.4113057036518977,
+      "mape": 5.709826006490263,
+      "n_test": 355
+    },
+    {
+      "ticker": "ROG.SW",
+      "name": "Roche",
+      "model": "finetuned",
+      "mae": 0.2769443072332187,
+      "rmse": 0.3479467490383556,
+      "mape": 4.710679509633563,
+      "n_test": 355
+    },
+    {
+      "ticker": "ABBN.SW",
+      "name": "ABB",
+      "model": "finetuned",
+      "mae": 0.31359217256055694,
+      "rmse": 0.4112249628543258,
+      "mape": 5.464683588819056,
+      "n_test": 355
+    },
+    {
+      "ticker": "SIKA.SW",
+      "name": "Sika",
+      "model": "finetuned",
+      "mae": 0.3474148916269525,
+      "rmse": 0.5160654889977129,
+      "mape": 6.4387842671580096,
+      "n_test": 355
+    },
+    {
+      "ticker": "UBSG.SW",
+      "name": "UBS",
+      "model": "finetuned",
+      "mae": 0.44136004142121976,
+      "rmse": 0.547571997014972,
+      "mape": 7.416939521765629,
+      "n_test": 360
+    },
+    {
+      "ticker": "ZURN.SW",
+      "name": "Zurich",
+      "model": "finetuned",
+      "mae": 0.26613876483955357,
+      "rmse": 0.36753937229025113,
+      "mape": 4.310397685959926,
+      "n_test": 359
+    },
+    {
+      "ticker": "GIVN.SW",
+      "name": "Givaudan",
+      "model": "finetuned",
+      "mae": 0.31384456403850625,
+      "rmse": 0.43187568334013354,
+      "mape": 5.396077999828899,
+      "n_test": 348
+    },
+    {
+      "ticker": "CFR.SW",
+      "name": "Richemont",
+      "model": "finetuned",
+      "mae": 0.5210768465169822,
+      "rmse": 0.6258562026102275,
+      "mape": 8.819537413622616,
+      "n_test": 347
+    },
+    {
+      "ticker": "UHR.SW",
+      "name": "Swatch",
+      "model": "finetuned",
+      "mae": 0.2921866163619094,
+      "rmse": 0.41464619824131616,
+      "mape": 5.144354442247623,
+      "n_test": 359
+    },
+    {
+      "ticker": "SCMN.SW",
+      "name": "Swisscom",
+      "model": "finetuned",
+      "mae": 0.3098956398460881,
+      "rmse": 0.4074134083352184,
+      "mape": 5.071539023168123,
+      "n_test": 1224
+    },
+    {
+      "ticker": "ADEN.SW",
+      "name": "Adecco",
+      "model": "finetuned",
+      "mae": 0.36746536887260023,
+      "rmse": 0.49150204824143534,
+      "mape": 7.425343509111855,
+      "n_test": 1229
+    },
+    {
+      "ticker": "SGSN.SW",
+      "name": "SGS",
+      "model": "finetuned",
+      "mae": 0.31933744745386416,
+      "rmse": 0.42976681709134473,
+      "mape": 5.245780502836412,
+      "n_test": 359
+    }
+  ],
+  "summary": {
+    "avg_mae_baseline": 0.34379914447152515,
+    "avg_mae_finetuned": 0.34004944303630685,
+    "avg_improvement_pct": 1.090666307789159,
+    "tickers_improved": 8,
+    "total_tickers": 13,
+    "evaluated_at": "2025-11-28T02:53:34.779829"
+  }
+}
