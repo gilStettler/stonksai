@@ -2,69 +2,37 @@ import os
 import pandas as pd
 import numpy as np
 import torch
-from chronos import Chronos2Pipeline
+from chronos import BaseChronosPipeline, Chronos2Pipeline
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 def ablation_study():
     # Configuration
-    PREDICTION_LENGTH = 20 # Forecast 20 days
-    CONTEXT_LENGTH = 60 # Lookback 60 days
-    
-    # Feature Groups
-    FEATURE_GROUPS = {
-        "Baseline (Target Only)": [],
-        "Technicals": ["volume", "return", "RSI", "ATR", "SMA", "EMA", "BBANDS"], # Add specific columns if they exist
-        "Macro": ["SP500", "EUROSTOXX_50", "VIX", "CHFUSD", "INFLATION", "FEDERAL_FUNDS_RATE"],
-        "Peers": ["Peer_"] # Will match any column starting with Peer_
-    }
-    
-    # Load Model (Zero-Shot)
-    print("Loading Chronos-2 model...")
-    # Using tiny for speed in testing, user can swap to small/base
-    # Note: Chronos 2 models are usually named like 'amazon/chronos-t5-tiny' but accessed via Chronos2Pipeline
-    pipeline = Chronos2Pipeline.from_pretrained(
-        "amazon/chronos-t5-tiny", 
-        device_map="auto",
-        torch_dtype=torch.bfloat16,
-    )
-    
-import os
-import pandas as pd
-import numpy as np
-import torch
-from chronos import Chronos2Pipeline
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-
-def ablation_study():
-    # Configuration
-    PREDICTION_LENGTH = 20 # Forecast 20 days
-    CONTEXT_LENGTH = 60 # Lookback 60 days
+    PREDICTION_LENGTH = 5  # Forecast 5 days ahead (production setting)
+    CONTEXT_LENGTH = 60  # Lookback 60 days
     TARGET_COL = "ctc_vol"
+    ID_COL = "id"
+    DATE_COL = "timestamp"
     
-    # Feature Groups
+    # Feature Groups for ablation study
     FEATURE_GROUPS = {
         "Baseline (Target Only)": [],
-        "Technicals": ["volume", "return", "RSI", "ATR", "SMA", "EMA", "BBANDS"], # Add specific columns if they exist
+        "Technicals": ["volume", "return", "RSI", "ATR", "SMA", "EMA", "BBANDS"],
         "Macro": ["SP500", "EUROSTOXX_50", "VIX", "CHFUSD", "INFLATION", "FEDERAL_FUNDS_RATE"],
-        "Peers": ["Peer_"] # Will match any column starting with Peer_
+        "Peers": ["Peer_"]  # Will match any column starting with Peer_
     }
     
     # Load Model (Zero-Shot)
     print("Loading Chronos-2 model...")
-    # Using tiny for speed in testing, user can swap to small/base
-    # Note: Chronos 2 models are usually named like 'amazon/chronos-t5-tiny' but accessed via Chronos2Pipeline
-    pipeline = Chronos2Pipeline.from_pretrained(
-        "amazon/chronos-t5-tiny", 
-        device_map="auto",
-        torch_dtype=torch.bfloat16,
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    pipeline: Chronos2Pipeline = BaseChronosPipeline.from_pretrained(
+        "amazon/chronos-2", 
+        device_map=device
     )
     
     data_dir = "processed_data"
-    # Find all stock files
     stock_files = [f for f in os.listdir(data_dir) if f.startswith("data_") and f.endswith(".csv")]
     
     print(f"Found {len(stock_files)} stocks to test.")
-    # Prediction Loop
     results = []
     
     for stock_file in stock_files:
@@ -73,146 +41,236 @@ def ablation_study():
         
         file_path = os.path.join(data_dir, stock_file)
         try:
-            df = pd.read_csv(file_path, index_col=0, parse_dates=True)
+            df = pd.read_csv(file_path, parse_dates=['timestamp'])
         except Exception as e:
             print(f"  Error loading {stock_file}: {e}")
             continue
+        
+        # Convert timestamp to datetime if not already
+        if 'timestamp' not in df.columns:
+            # Assume first column is timestamp if index
+            df = df.reset_index()
+            df.rename(columns={df.columns[0]: 'timestamp'}, inplace=True)
+        
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df.sort_values('timestamp', inplace=True)
+        
+        # CRITICAL: Reindex to Business Days to ensure regular frequency
+        # This is how the chronos-2-test notebook handles it
+        all_bdays = pd.date_range(start=df['timestamp'].min(), end=df['timestamp'].max(), freq='B')
+        df = df.set_index('timestamp').reindex(all_bdays)
+        df.index.name = 'timestamp'
+        df = df.reset_index()
+        
+        # Forward fill missing values (from weekends/holidays)
+        # Only for numeric columns to avoid issues
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        df[numeric_cols] = df[numeric_cols].ffill()
             
         # Ensure we have enough data
         if len(df) < CONTEXT_LENGTH + PREDICTION_LENGTH:
             print(f"  Not enough data for {stock_name}, skipping.")
             continue
-            
-        # Prepare Data
-        # We'll take the last available window for testing
-        # Context: [-CONTEXT_LENGTH-PREDICTION_LENGTH : -PREDICTION_LENGTH]
-        # Future (Ground Truth): [-PREDICTION_LENGTH : ]
         
+        # Check if target column exists
+        if TARGET_COL not in df.columns:
+            print(f"  Target column {TARGET_COL} not found, skipping.")
+            continue
+            
         # Split point
         split_idx = len(df) - PREDICTION_LENGTH
         
-        # Context Data (History)
-        context_df_full = df.iloc[:split_idx].copy()
-        # We only need the last CONTEXT_LENGTH rows for the context input to Chronos
-        # BUT for covariates, we might want to provide the full history if Chronos uses it.
-        # Chronos 2 usually takes a dataframe. Let's provide the relevant context window.
-        # To be safe and consistent with typical usage, let's provide a generous context if possible, 
-        # or just the fixed CONTEXT_LENGTH. The prompt implies fixed context length.
-        context_df = context_df_full.iloc[-CONTEXT_LENGTH:].copy()
+        # Context Data (History) and Future Data
+        context_df = df.iloc[:split_idx].copy()
+        future_df = df.iloc[split_idx:].copy()
         
-        # Future Data (Ground Truth & Future Covariates)
-        future_df_full = df.iloc[split_idx:].copy()
+        # Ground truth
+        y_true = future_df[TARGET_COL].values
         
-        # Target Series (Ground Truth)
-        target_series = future_df_full[TARGET_COL]
-        
+        # Test each feature group
         for group_name, features in FEATURE_GROUPS.items():
             print(f"  Testing Feature Group: {group_name}")
             
             # Identify available features for this group
-            available_features = []
             if group_name == "Peers":
                 available_features = [c for c in df.columns if c.startswith("Peer_")]
             else:
                 available_features = [f for f in features if f in df.columns]
             
-            # Prepare Input DataFrames for Chronos
-            # Chronos 2 predict_df expects:
-            # 1. df: Context dataframe (history)
-            # 2. future_df: Dataframe with future covariates (optional)
+            # Build column sets (similar to notebook approach)
+            context_cols = [TARGET_COL] + available_features
+            future_cols = available_features  # future_df does NOT include target
             
-            # Construct Context DF
-            # Must contain: timestamp, target, and past covariates
-            # We need to reshape to long format or just ensure columns are present if using wide format support?
-            # Chronos 2 predict_df usually expects a long format or a specific structure. 
-            # However, the quickstart shows it handling standard wide DFs if we specify target and id.
-            # Let's add a dummy ID if not present.
+            # Prepare DataFrames for Chronos
+            # Add ID and reset index to make timestamp a column
+            context_df_chronos = context_df[context_cols].copy()
+            context_df_chronos[ID_COL] = stock_name
+            context_df_chronos = context_df_chronos.reset_index()
+            context_df_chronos.rename(columns={context_df_chronos.columns[0]: DATE_COL}, inplace=True)
             
-            current_context = context_df.copy()
-            current_context["id"] = stock_name
-            current_context = current_context.reset_index() # Ensure timestamp is a column
-            # Rename index to 'timestamp' if it's not named
-            if "timestamp" not in current_context.columns:
-                 current_context.rename(columns={"index": "timestamp", "Date": "timestamp"}, inplace=True)
+            # Reorder columns: [id, timestamp, target, ...features]
+            context_df_chronos = context_df_chronos[[ID_COL, DATE_COL, TARGET_COL] + available_features]
             
-            # Construct Future DF (for covariates)
-            # Must contain: timestamp, and future values of covariates
-            current_future = future_df_full.copy()
-            current_future["id"] = stock_name
-            current_future = current_future.reset_index()
-            if "timestamp" not in current_future.columns:
-                 current_future.rename(columns={"index": "timestamp", "Date": "timestamp"}, inplace=True)
-            
-            # Drop target from future_df to avoid leakage (though Chronos ignores it if passed as future_df, it's safer)
-            if TARGET_COL in current_future.columns:
-                current_future = current_future.drop(columns=[TARGET_COL])
-            
-            # Select only relevant columns + mandatory ones
-            cols_to_keep = ["id", "timestamp"] + ([TARGET_COL] if TARGET_COL in current_context.columns else []) + available_features
-            
-            # Filter Context
-            # Note: context must have target
-            current_context_filtered = current_context[cols_to_keep].copy()
-            
-            # Filter Future
-            # Future df should NOT have target, but MUST have covariates
-            cols_to_keep_future = ["id", "timestamp"] + available_features
-            current_future_filtered = current_future[cols_to_keep_future].copy()
-            
-            # Predict
             try:
-                # If no features, we don't pass future_df (univariate forecast)
+                # Predict
                 if not available_features:
-                    forecast_df = pipeline.predict_df(
-                        current_context_filtered,
+                    # Baseline: univariate prediction without future_df
+                    pred_df = pipeline.predict_df(
+                        context_df_chronos,
                         prediction_length=PREDICTION_LENGTH,
-                        id_column="id",
-                        timestamp_column="timestamp",
+                        quantile_levels=[0.1, 0.5, 0.9],
+                        id_column=ID_COL,
+                        timestamp_column=DATE_COL,
                         target=TARGET_COL
                     )
                 else:
-                    forecast_df = pipeline.predict_df(
-                        current_context_filtered,
-                        future_df=current_future_filtered,
+                    # With covariates: use future_df
+                    future_df_chronos = future_df[future_cols].copy()
+                    future_df_chronos[ID_COL] = stock_name
+                    future_df_chronos = future_df_chronos.reset_index()
+                    future_df_chronos.rename(columns={future_df_chronos.columns[0]: DATE_COL}, inplace=True)
+                    
+                    # Reorder columns: [id, timestamp, ...features]
+                    future_df_chronos = future_df_chronos[[ID_COL, DATE_COL] + available_features]
+                    
+                    pred_df = pipeline.predict_df(
+                        context_df_chronos,
+                        future_df=future_df_chronos,
                         prediction_length=PREDICTION_LENGTH,
-                        id_column="id",
-                        timestamp_column="timestamp",
+                        quantile_levels=[0.1, 0.5, 0.9],
+                        id_column=ID_COL,
+                        timestamp_column=DATE_COL,
                         target=TARGET_COL
                     )
                 
-                # Extract Predictions
-                # forecast_df contains 'predictions' (mean) and quantiles. We use 'predictions' (mean) for metrics.
-                # We need to align it with target_series.
-                # forecast_df should be sorted by timestamp.
+                # Extract predictions
+                # pred_df contains: item_id, timestamp, target_name, predictions (mean), 0.1, 0.5, 0.9 quantiles
+                y_pred_median = pred_df["0.5"].values  # Median forecast
+                y_pred_q10 = pred_df["0.1"].values     # 10th percentile
+                y_pred_q90 = pred_df["0.9"].values     # 90th percentile
                 
-                predictions = forecast_df["predictions"].values
+                # --- Deterministic Metrics (Point Forecast) ---
+                mae = mean_absolute_error(y_true, y_pred_median)
+                mse = mean_squared_error(y_true, y_pred_median)
+                rmse = np.sqrt(mse)
                 
-                # Calculate Metrics
-                mae = mean_absolute_error(target_series, predictions)
-                mse = mean_squared_error(target_series, predictions)
+                # --- Adjusted R² ---
+                # Measures proportion of variance explained, adjusted for number of features
+                from sklearn.metrics import r2_score
+                r2 = r2_score(y_true, y_pred_median)
+                n = len(y_true)
+                p = len(available_features)  # Number of predictors
+                if n - p - 1 > 0:
+                    adj_r2 = 1 - (1 - r2) * (n - 1) / (n - p - 1)
+                else:
+                    adj_r2 = np.nan
+                
+                # --- Quantile Losses ---
+                # Pinball loss for each quantile
+                quantile_losses = {}
+                quantiles = [0.1, 0.5, 0.9]
+                quantile_preds = {"0.1": y_pred_q10, "0.5": y_pred_median, "0.9": y_pred_q90}
+                
+                for q in quantiles:
+                    y_pred_q = quantile_preds[f"{q}"]
+                    diff = y_true - y_pred_q
+                    # Pinball loss: max(q * diff, (q-1) * diff)
+                    loss = np.mean(np.maximum(q * diff, (q - 1) * diff))
+                    quantile_losses[f"QL_{q}"] = loss
+                
+                # --- CRPS (Continuous Ranked Probability Score) ---
+                # Approximation using quantile losses via trapezoidal rule
+                # CRPS = 2 * integral of QuantileLoss(q) from 0 to 1
+                # We approximate with 3 quantiles: 0.1, 0.5, 0.9
+                qs = np.array(quantiles)
+                Ls = np.array([quantile_losses[f"QL_{q}"] for q in quantiles])
+                crps = 2 * np.trapz(Ls, qs)
                 
                 results.append({
                     "Stock": stock_name,
                     "Feature Group": group_name,
                     "MAE": mae,
-                    "MSE": mse
+                    "MSE": mse,
+                    "RMSE": rmse,
+                    "Adjusted_R2": adj_r2,
+                    "CRPS": crps,
+                    "QL_0.1": quantile_losses["QL_0.1"],
+                    "QL_0.5": quantile_losses["QL_0.5"],
+                    "QL_0.9": quantile_losses["QL_0.9"],
+                    "Num Features": len(available_features)
                 })
+                print(f"    MAE: {mae:.4f}, RMSE: {rmse:.4f}, CRPS: {crps:.4f}, Adj.R²: {adj_r2:.3f}")
                 
             except Exception as e:
                 print(f"    Prediction failed: {e}")
-                # Fallback or record error
                 results.append({
                     "Stock": stock_name,
                     "Feature Group": group_name,
                     "MAE": np.nan,
-                    "MSE": np.nan
+                    "MSE": np.nan,
+                    "RMSE": np.nan,
+                    "Num Features": len(available_features),
+                    "Error": str(e)
                 })
 
     # Save Results
     results_df = pd.DataFrame(results)
     results_df.to_csv("ablation_results.csv", index=False)
-    print("\nAblation Study Completed. Results saved to ablation_results.csv")
-    print(results_df)
+    print("\n\nAblation Study Completed. Results saved to ablation_results.csv")
+    
+    # Display summary statistics
+    print("\n" + "="*80)
+    print("SUMMARY STATISTICS BY FEATURE GROUP")
+    print("="*80)
+    
+    summary = results_df.groupby("Feature Group").agg({
+        "MAE": ["mean", "std", "min", "max"],
+        "RMSE": ["mean", "std", "min", "max"],
+        "CRPS": ["mean", "std", "min", "max"],
+        "Adjusted_R2": ["mean", "std"],
+        "QL_0.1": ["mean"],
+        "QL_0.5": ["mean"],
+        "QL_0.9": ["mean"],
+        "Num Features": "first"
+    }).round(6)
+    
+    print(summary)
+    
+    # Calculate improvement vs baseline
+    print("\n" + "="*80)
+    print("IMPROVEMENT vs BASELINE (Lower is better for CRPS, QL; Higher for R²)")
+    print("="*80)
+    
+    baseline_df = results_df[results_df["Feature Group"] == "Baseline (Target Only)"]
+    
+    if not baseline_df.empty:
+        for group_name in FEATURE_GROUPS.keys():
+            if group_name == "Baseline (Target Only)":
+                continue
+            
+            group_df = results_df[results_df["Feature Group"] == group_name]
+            
+            # Match by stock
+            merged = baseline_df.merge(group_df, on="Stock", suffixes=("_baseline", "_group"))
+            
+            if not merged.empty:
+                # Calculate improvements (positive = better for MAE/RMSE/CRPS, negative for R²)
+                mae_improvement = ((merged["MAE_baseline"] - merged["MAE_group"]) / merged["MAE_baseline"] * 100).mean()
+                rmse_improvement = ((merged["RMSE_baseline"] - merged["RMSE_group"]) / merged["RMSE_baseline"] * 100).mean()
+                crps_improvement = ((merged["CRPS_baseline"] - merged["CRPS_group"]) / merged["CRPS_baseline"] * 100).mean()
+                
+                # For R², higher is better, so we compare differently
+                r2_baseline = merged["Adjusted_R2_baseline"].mean()
+                r2_group = merged["Adjusted_R2_group"].mean()
+                r2_change = r2_group - r2_baseline
+                
+                print(f"\n{group_name}:")
+                print(f"  MAE Improvement:  {mae_improvement:+.2f}%")
+                print(f"  RMSE Improvement: {rmse_improvement:+.2f}%")
+                print(f"  CRPS Improvement: {crps_improvement:+.2f}% ⭐ (Most Important)")
+                print(f"  Adj. R² Change:   {r2_change:+.4f}")
+    
+    print("\n" + "="*80 + "\n")
 
 if __name__ == "__main__":
     ablation_study()
