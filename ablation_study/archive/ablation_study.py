@@ -29,7 +29,7 @@ def ablation_study():
         device_map=device
     )
     
-    data_dir = "processed_data"
+    data_dir = "../processed_data"
     stock_files = [f for f in os.listdir(data_dir) if f.startswith("data_") and f.endswith(".csv")]
     
     print(f"Found {len(stock_files)} stocks to test.")
