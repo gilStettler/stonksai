@@ -68,6 +68,12 @@ def inject_peer_features():
         
         target_df = target_info["df"]
         
+        # Clean up existing Peer columns to avoid merge conflicts (suffixes)
+        cols_to_drop = [c for c in target_df.columns if c.startswith("Peer_")]
+        if cols_to_drop:
+            print(f"  Dropping {len(cols_to_drop)} existing peer columns.")
+            target_df = target_df.drop(columns=cols_to_drop)
+        
         for peer_ticker, abs_score in top_peers.items():
             real_score = stock_corrs[peer_ticker]
             peer_name = unique_stocks[peer_ticker]["name"]
@@ -81,16 +87,30 @@ def inject_peer_features():
             # We use left join to keep target's index
             
             # Create temp DF for peer features
-            peer_features = peer_df[["close", "return"]].copy()
-            peer_features.columns = [f"Peer_{peer_name}_close", f"Peer_{peer_name}_return"]
+            # We want to add peer_close, peer_return, AND the new volatility features
+            features_to_inject = [
+                "close", "return",
+                "ctc_vol_lag_1", "ctc_vol_lag_2", "ctc_vol_lag_3",
+                "abs_log_return_lag_1", "abs_log_return_lag_2", "abs_log_return_lag_3"
+            ]
+            
+            # Ensure these columns exist in peer_df
+            valid_features = [f for f in features_to_inject if f in peer_df.columns]
+            
+            peer_features = peer_df[valid_features].copy()
+            peer_features.columns = [f"Peer_{peer_name}_{col}" for col in valid_features]
             
             # Merge
             target_df = target_df.merge(peer_features, left_index=True, right_index=True, how="left")
             
             # Forward fill missing peer data (if peer has gaps but target trades)
             # Limit ffill to avoid stale data? Maybe 5 days.
-            target_df[f"Peer_{peer_name}_close"] = target_df[f"Peer_{peer_name}_close"].ffill(limit=5)
-            target_df[f"Peer_{peer_name}_return"] = target_df[f"Peer_{peer_name}_return"].fillna(0) # Return 0 if missing
+            for col in peer_features.columns:
+                target_df[col] = target_df[col].ffill(limit=5)
+                # Fill remaining NaNs with 0 only for return-like features, not prices/vol?
+                # Actually, 0 for vol is risky, but better than NaN for training.
+                # Let's fill 0 for now as per previous logic for returns.
+                target_df[col] = target_df[col].fillna(0)
             
         # Save updated file
         # We overwrite the file or create a new one? 

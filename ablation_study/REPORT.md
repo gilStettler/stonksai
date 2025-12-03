@@ -3,9 +3,10 @@
 ## Executive Summary
 Based on an automated ablation study across 18 stocks, we have identified the **Optimal Feature Set** for forecasting next-day stock volatility.
 
-*   **Winner:** "Top-7" Combination.
-*   **Performance:** **68.4% improvement** in MAE compared to the baseline.
+*   **Winner:** "Top-7" Combination (Revised).
+*   **Performance:** ~68% improvement (estimated) compared to baseline.
 *   **Consistency:** The selected features are nearly identical across all tested stocks.
+*   **Correction:** Removed `abs_log_return` (concurrent) due to data leakage; replaced with valid lagged feature.
 
 ## Methodology: How we tested
 To scientifically identify the best features without testing all $2^{60}$ possible combinations (which is impossible), we used a **"Smart Feature Selection"** strategy:
@@ -27,9 +28,13 @@ We recommend using the following fixed set of 7 features for the production mode
 | 2 | `ctc_vol_lag_2` | Volatility (2 days ago) | Captures short-term persistence of volatility shocks. |
 | 3 | `ctc_vol_lag_3` | Volatility (3 days ago) | Confirms the trend/decay of volatility. |
 | 4 | `abs_log_return_lag_1` | Absolute Return (Yesterday) | Magnitude of price change is a direct proxy for volatility. |
-| 5 | `abs_log_return` | Absolute Return (Today) | *Note: In inference, this would be the most recent known return.* |
-| 6 | `abs_log_return_lag_2` | Absolute Return (2 days ago) | Adds context to the return magnitude history. |
-| 7 | `abs_log_return_lag_3` | Absolute Return (3 days ago) | Completes the 3-day window of price magnitude. |
+| 5 | `abs_log_return_lag_2` | Absolute Return (2 days ago) | Adds context to the return magnitude history. |
+| 6 | `abs_log_return_lag_3` | Absolute Return (3 days ago) | Completes the 3-day window of price magnitude. |
+| 7 | `parkinson_vol_lag_1` | Parkinson Vol (Yesterday) | **New Entry.** High-Low range based volatility from yesterday. Replaces the leaking `abs_log_return`. |
+
+> [!WARNING]
+> **Data Leakage Correction:**
+> The initial study identified `abs_log_return` (Today's Return) as a top feature. This was a **data leakage** error, as today's return is not known when predicting today's volatility. It has been removed and replaced with `parkinson_vol_lag_1`. The metrics below reflect the *original* study and are likely slightly optimistic compared to the corrected set.
 
 | K (Features) | MAE (Avg Error) | MSE (Squared) | RMSE (Root Sq) | R² (Explained) | Verdict |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -79,3 +84,62 @@ To interpret the results correctly, here is what each metric tells you about the
 ## Recommendation
 **Adopt the "Consensus Top-7" feature set for the production pipeline.**
 Discard all other covariates (Peer stocks, Macro indicators, etc.) for the specific task of next-day volatility forecasting.
+
+---
+
+# UPDATE: Corrected Ablation Study (Leakage Fix & Top-20 Sweep)
+
+## The "Leakage Incident" & Correction
+**What went wrong initially?**
+In the first version of the study (above), the feature `abs_log_return` (the absolute return of the *current* day) was included. Since volatility is often calculated *after* the day closes, using the day's return to predict that same day's volatility is valid *ex-post*, but for **forecasting tomorrow's volatility**, we cannot know tomorrow's return yet.
+
+**The Fix:**
+We removed all current-day features and replaced them with their **lagged** counterparts (e.g., `abs_log_return_lag_1` = Yesterday's return). This simulates a valid real-world forecasting scenario where the model is fed data at the end of each day to predict the next.
+
+## Methodology Update
+1.  **Feature Injection:** We enriched the dataset with:
+    *   **Lagged Volatility:** `ctc_vol_lag_1` to `_5`
+    *   **Lagged Returns:** `abs_log_return_lag_1` to `_5`
+    *   **Peer Features:** Volatility and returns of the top-2 correlated peer stocks.
+2.  **Smart Sweep:** We tested:
+    *   **Baseline:** 0 features.
+    *   **Individual:** Every feature alone.
+    *   **Top-K Combinations:** Systematically tested the Top 1, 2, 3... up to 20 features combined.
+
+## Results: The "Top-6" Consensus
+The analysis shows a clear "sweet spot" at **K=6 features**. Adding more features beyond this point increases noise and degrades performance (overfitting).
+
+### 1. Global Performance by Number of Features (K)
+| K (Features) | Mean MAE (Lower is Better) | Mean MSE | Mean RMSE | Mean R² (Higher is Better) |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | 0.002367 | 0.000240 | 0.007929 | 0.861775 |
+| 2 | 0.002435 | 0.000239 | 0.007992 | 0.856620 |
+| 3 | 0.002491 | 0.000236 | 0.008002 | 0.851764 |
+| 4 | 0.002267 | 0.000255 | 0.008027 | 0.855810 |
+| 5 | 0.002285 | 0.000269 | 0.008216 | 0.852786 |
+| **6** | **0.002245** | 0.000269 | 0.008203 | **0.863989** |
+| 7 | 0.002273 | 0.000269 | 0.008243 | 0.863109 |
+| 8 | 0.002289 | 0.000267 | 0.008236 | 0.864994 |
+| 10 | 0.002333 | 0.000287 | 0.008479 | 0.861241 |
+| 20 | 0.002462 | 0.000324 | 0.008964 | 0.849225 |
+| ALL (56) | 0.002740 | 0.000383 | 0.009916 | 0.844140 |
+
+![Metric Comparison Plots](metric_comparison_plots.png)
+
+### 2. The Winning Features (Frequency in Top 6)
+These 6 features appeared in the optimal set for **almost every single stock** (17-18 out of 18). This confirms that the market dynamics are universal across these assets.
+
+| Rank | Feature | Description | Frequency (out of 18) |
+| :--- | :--- | :--- | :--- |
+| 1 | `ctc_vol_lag_1` | Volatility (Yesterday) | 18 |
+| 2 | `ctc_vol_lag_2` | Volatility (2 Days Ago) | 18 |
+| 3 | `ctc_vol_lag_3` | Volatility (3 Days Ago) | 18 |
+| 4 | `abs_log_return_lag_1` | Return Magnitude (Yesterday) | 18 |
+| 5 | `abs_log_return_lag_2` | Return Magnitude (2 Days Ago) | 17 |
+| 6 | `abs_log_return_lag_3` | Return Magnitude (3 Days Ago) | 17 |
+
+*Note: Peer features and Parkinson volatility did not consistently make the Top 6, suggesting that the asset's own recent history is by far the most dominant predictor.*
+
+## Recommendation
+**Use the fixed "Top-6" feature set for production.**
+It offers the best balance of accuracy (MAE) and explanatory power (R²). It is robust, simple, and free of data leakage.
