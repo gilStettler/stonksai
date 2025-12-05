@@ -1,0 +1,150 @@
+{
+  "metadata": [
+    {
+      "ticker": "NSRGY",
+      "train_size": 3688,
+      "val_size": 923,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "UBS",
+      "train_size": 2212,
+      "val_size": 553,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "ABBNY",
+      "train_size": 4954,
+      "val_size": 1239,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0QLR.LON",
+      "train_size": 2683,
+      "val_size": 671,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0QKI.LON",
+      "train_size": 1978,
+      "val_size": 495,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0QP2.LON",
+      "train_size": 2982,
+      "val_size": 746,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0QKY.LON",
+      "train_size": 2151,
+      "val_size": 538,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0QNO.LON",
+      "train_size": 1920,
+      "val_size": 480,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0QPS.LON",
+      "train_size": 2159,
+      "val_size": 540,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0A0D.LON",
+      "train_size": 990,
+      "val_size": 248,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0Z4C.LON",
+      "train_size": 1632,
+      "val_size": 409,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0QOQ.LON",
+      "train_size": 1706,
+      "val_size": 427,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0QMG.LON",
+      "train_size": 1867,
+      "val_size": 467,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0QQ2.LON",
+      "train_size": 1756,
+      "val_size": 440,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0QMW.LON",
+      "train_size": 1761,
+      "val_size": 441,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    },
+    {
+      "ticker": "0QK6.LON",
+      "train_size": 1687,
+      "val_size": 422,
+      "has_covariates": true,
+      "covariates": [
+        "vix"
+      ]
+    }
+  ],
+  "num_series": 16,
+  "total_train_points": 36126
+}

@@ -1,0 +1,182 @@
+{
+  "metadata": [
+    {
+      "ticker": "NSRGY",
+      "train_size": 3632,
+      "val_size": 909,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "UBS",
+      "train_size": 2168,
+      "val_size": 543,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "ABBNY",
+      "train_size": 4889,
+      "val_size": 1223,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0QLR.LON",
+      "train_size": 2620,
+      "val_size": 656,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0QKI.LON",
+      "train_size": 1919,
+      "val_size": 480,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0QP2.LON",
+      "train_size": 2917,
+      "val_size": 730,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0QKY.LON",
+      "train_size": 2092,
+      "val_size": 524,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0QNO.LON",
+      "train_size": 1861,
+      "val_size": 466,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0QPS.LON",
+      "train_size": 2095,
+      "val_size": 524,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0A0D.LON",
+      "train_size": 937,
+      "val_size": 235,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0Z4C.LON",
+      "train_size": 1576,
+      "val_size": 395,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0QOQ.LON",
+      "train_size": 1646,
+      "val_size": 412,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0QMG.LON",
+      "train_size": 1807,
+      "val_size": 452,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0QQ2.LON",
+      "train_size": 1698,
+      "val_size": 425,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0QMW.LON",
+      "train_size": 1701,
+      "val_size": 426,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    },
+    {
+      "ticker": "0QK6.LON",
+      "train_size": 1630,
+      "val_size": 408,
+      "has_covariates": true,
+      "covariates": [
+        "vix",
+        "fedfunds",
+        "t10y2y"
+      ]
+    }
+  ],
+  "num_series": 16,
+  "total_train_points": 35188
+}

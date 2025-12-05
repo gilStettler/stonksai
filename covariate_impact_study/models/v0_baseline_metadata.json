@@ -1,0 +1,118 @@
+{
+  "metadata": [
+    {
+      "ticker": "NSRGY",
+      "train_size": 3688,
+      "val_size": 923,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "UBS",
+      "train_size": 2212,
+      "val_size": 553,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "ABBNY",
+      "train_size": 4954,
+      "val_size": 1239,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0QLR.LON",
+      "train_size": 2723,
+      "val_size": 681,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0QKI.LON",
+      "train_size": 2008,
+      "val_size": 502,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0QP2.LON",
+      "train_size": 3031,
+      "val_size": 758,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0QKY.LON",
+      "train_size": 2176,
+      "val_size": 545,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0QNO.LON",
+      "train_size": 1946,
+      "val_size": 487,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0QPS.LON",
+      "train_size": 2186,
+      "val_size": 547,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0A0D.LON",
+      "train_size": 994,
+      "val_size": 249,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0Z4C.LON",
+      "train_size": 1653,
+      "val_size": 414,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0QOQ.LON",
+      "train_size": 1728,
+      "val_size": 433,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0QMG.LON",
+      "train_size": 1891,
+      "val_size": 473,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0QQ2.LON",
+      "train_size": 1778,
+      "val_size": 445,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0QMW.LON",
+      "train_size": 1786,
+      "val_size": 447,
+      "has_covariates": false,
+      "covariates": []
+    },
+    {
+      "ticker": "0QK6.LON",
+      "train_size": 1708,
+      "val_size": 428,
+      "has_covariates": false,
+      "covariates": []
+    }
+  ],
+  "num_series": 16,
+  "total_train_points": 36462
+}

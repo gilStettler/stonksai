@@ -1,0 +1,12 @@
+{
+  "version_name": "v1_vix",
+  "covariate_features": [
+    "vix"
+  ],
+  "num_series": 16,
+  "num_steps": 3500,
+  "learning_rate": 1e-06,
+  "batch_size": 8,
+  "prediction_length": 5,
+  "trained_at": "2025-11-28T04:58:20.286954"
+}

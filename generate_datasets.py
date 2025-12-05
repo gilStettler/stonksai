@@ -269,7 +269,6 @@ def main():
         "0QQ2.LON": "Geberit",
         "0QMW.LON": "Kuehne_Nagel",
         "0QK6.LON": "Logitech",
-        "AMRZ": "Amrize"
     }
     
     for f in files:
