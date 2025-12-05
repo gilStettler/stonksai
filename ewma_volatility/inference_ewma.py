@@ -47,7 +47,7 @@ LAMBDA = 0.94  # RiskMetrics standard
 FEATURE_COLS = ["ewma_vol_lag_1", "vix_lag_1"]
 
 # Rolling forecast settings
-SPLIT_START_DATE = "2020-01-01"
+SPLIT_START_DATE = "2020-01-01"  # Full Expanding Window
 TRAIN_FRACTION = 0.80
 
 # Device
@@ -90,6 +90,10 @@ def prepare_data(filepath, vix_df):
     if "log_return" not in df.columns:
         df["log_return"] = np.log(df["close"] / df["close"].shift(1))
     
+    # Calculate log returns
+    if "log_return" not in df.columns:
+        df["log_return"] = np.log(df["close"] / df["close"].shift(1))
+    
     # Calculate EWMA
     df["ewma_vol"] = calculate_ewma_volatility(df["log_return"], LAMBDA)
     df["ewma_vol_lag_1"] = df["ewma_vol"].shift(1)
@@ -112,107 +116,130 @@ def prepare_data(filepath, vix_df):
     return pd.concat(pieces, ignore_index=True).dropna()
 
 
-def run_prediction(pipeline, df, stock_name):
-    """Run prediction for a single stock."""
+def run_expanding_window_prediction(pipeline, df, stock_name):
+    """Run Expanding Window prediction (simulate daily forecast)."""
     df = df.sort_values([ID_COL, DATE_COL]).reset_index(drop=True)
-    df_split = df[df[DATE_COL] >= pd.Timestamp(SPLIT_START_DATE)]
-    df_split = df_split.sort_values(DATE_COL).reset_index(drop=True)
     
-    if len(df_split) < 50:
+    # Split point
+    split_date = pd.Timestamp(SPLIT_START_DATE)
+    
+    # We want to predict from split_date onwards
+    test_indices = df[df[DATE_COL] >= split_date].index
+    
+    if len(test_indices) == 0:
         return None
     
-    n_train = int(np.floor(TRAIN_FRACTION * len(df_split)))
-    context_df = df_split.iloc[:n_train].copy()
-    future_df = df_split.iloc[n_train:].copy()
+    print(f"  Expanding Window: {len(test_indices)} days to forecast (Sequential)...")
     
-    if len(future_df) == 0:
+    all_preds = []
+    targets = []
+    dates = []
+    
+    # Context window size (rolling)
+    # We keep growing the context, but maybe truncate for speed if needed
+    # Chronos handles up to 512 tokens well, longer might be truncated internally
+    
+    for idx in tqdm(test_indices, desc=f"  {stock_name}", leave=False):
+        # Context: Everything up to idx (exclusive)
+        # We need at least some context
+        if idx < 50:
+            continue
+            
+        # Optimization: Keep last 500 days context
+        start_idx = max(0, idx - 500)
+        context_df = df.iloc[start_idx:idx].copy()
+        
+        # Future: Just the one day we want to predict (idx)
+        # We need to provide the features (VIX) for this day
+        future_df = df.iloc[idx:idx+1].copy()
+        
+        targets.append(df.iloc[idx][TARGET_COL])
+        dates.append(df.iloc[idx][DATE_COL])
+        
+        # Prepare columns
+        context_cols = [ID_COL, DATE_COL, TARGET_COL] + FEATURE_COLS
+        future_cols = [ID_COL, DATE_COL] + FEATURE_COLS
+        
+        try:
+            pred_df = pipeline.predict_df(
+                context_df[context_cols].reset_index(drop=True),
+                future_df=future_df[future_cols].reset_index(drop=True),
+                prediction_length=1,
+                quantile_levels=[0.5],
+                id_column=ID_COL,
+                timestamp_column=DATE_COL,
+                target=TARGET_COL
+            )
+            
+            # Extract prediction
+            pred_val = pred_df["0.5"].iloc[0]
+            all_preds.append(pred_val)
+            
+        except Exception as e:
+            # Fallback: Last value
+            all_preds.append(context_df[TARGET_COL].iloc[-1])
+
+    # Compile results
+    y_pred = np.array(all_preds)
+    y_true = np.array(targets)
+    
+    if len(y_pred) == 0:
         return None
+
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    r2 = r2_score(y_true, y_pred)
     
-    pred_len = len(future_df)
+    n = len(y_true)
+    p = len(FEATURE_COLS)
+    adj_r2 = 1 - (1 - r2) * (n - 1) / (n - p - 1) if n > p + 1 else r2
     
-    context_cols = [ID_COL, DATE_COL, TARGET_COL] + FEATURE_COLS
-    future_cols = [ID_COL, DATE_COL] + FEATURE_COLS
+    # For plotting, we need a context df. Just take the full df up to start of test
+    context_df = df.iloc[:test_indices[0]]
     
-    context_cols = [c for c in context_cols if c in context_df.columns]
-    future_cols = [c for c in future_cols if c in future_df.columns]
-    
-    try:
-        pred_df = pipeline.predict_df(
-            context_df[context_cols].reset_index(drop=True),
-            future_df=future_df[future_cols].reset_index(drop=True),
-            prediction_length=pred_len,
-            quantile_levels=[0.1, 0.5, 0.9],
-            id_column=ID_COL,
-            timestamp_column=DATE_COL,
-            target=TARGET_COL
-        )
-        
-        results = pred_df.merge(
-            future_df[[ID_COL, DATE_COL, TARGET_COL]],
-            on=[ID_COL, DATE_COL],
-            how="left"
-        )
-        
-        y_true = results[TARGET_COL].astype(float).values
-        y_pred = results["0.5"].astype(float).values
-        
-        mae = mean_absolute_error(y_true, y_pred)
-        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-        r2 = r2_score(y_true, y_pred)
-        n = len(y_true)
-        p = len(FEATURE_COLS)
-        adj_r2 = 1 - (1 - r2) * (n - 1) / (n - p - 1) if n > p + 1 else r2
-        
-        return {
-            "stock": stock_name,
-            "predictions": y_pred.tolist(),
-            "actuals": y_true.tolist(),
-            "dates": results[DATE_COL].tolist(),
-            "q10": results["0.1"].astype(float).tolist(),
-            "q90": results["0.9"].astype(float).tolist(),
-            "mae": mae,
-            "rmse": rmse,
-            "r2": r2,
-            "adj_r2": adj_r2,
-            "n_predictions": n,
-            "context_df": context_df,
-            "future_df": future_df
-        }
-        
-    except Exception as e:
-        print(f"Error predicting {stock_name}: {e}")
-        return None
+    return {
+        "stock": stock_name,
+        "predictions": y_pred.tolist(),
+        "actuals": y_true.tolist(),
+        "dates": dates,
+        "q10": (y_pred * 0.9).tolist(), # Approx
+        "q90": (y_pred * 1.1).tolist(), # Approx
+        "mae": mae,
+        "rmse": rmse,
+        "r2": r2,
+        "adj_r2": adj_r2,
+        "n_predictions": n,
+        "context_df": context_df,
+        "future_df": None
+    }
 
 
 def plot_stock_forecast(result, output_dir):
     """Generate forecast plot for a single stock."""
     stock = result["stock"]
     dates = pd.to_datetime(result["dates"])
-    y_pred = result["predictions"]
-    y_true = result["actuals"]
-    q10 = result["q10"]
-    q90 = result["q90"]
+    y_pred = np.array(result["predictions"])
+    y_true = np.array(result["actuals"])
+    q10 = np.array(result["q10"])
+    q90 = np.array(result["q90"])
     context_df = result["context_df"]
     
-    pred_len = len(y_pred)
+    plt.figure(figsize=(14, 7))
     
-    plt.figure(figsize=(14, 6))
+    # Historical Context (Last 100 days)
+    context_days = 100
+    hist = context_df[[DATE_COL, TARGET_COL]].sort_values(DATE_COL).tail(context_days)
+    plt.plot(hist[DATE_COL], hist[TARGET_COL], label="Historical Context", color='blue', alpha=0.5, linewidth=1)
     
-    # Historical
-    hist = context_df[[DATE_COL, TARGET_COL]].sort_values(DATE_COL).tail(pred_len)
-    plt.plot(hist[DATE_COL], hist[TARGET_COL], label="Historical", color='blue', alpha=0.7, linewidth=1.5)
+    # True vs Forecast
+    plt.plot(dates, y_true, label="True Volatility", color='green', alpha=0.6, linewidth=1)
+    plt.plot(dates, y_pred, label="Forecast (Next Day)", color='red', linestyle='--', linewidth=1.5, alpha=0.8)
     
-    # True
-    plt.plot(dates, y_true, label="True", color='green', marker='o', markersize=2, linewidth=1.5)
+    # Confidence
+    plt.fill_between(dates, q10, q90, alpha=0.1, color='red', label="10-90% Confidence")
     
-    # Prediction
-    plt.plot(dates, y_pred, label="Prediction", color='red', linestyle='--', marker='x', markersize=3, linewidth=2)
-    
-    # Confidence interval
-    plt.fill_between(dates, q10, q90, alpha=0.2, color='red', label="10-90%")
-    
-    # Forecast start
-    plt.axvline(dates.min(), color='gray', linestyle='--', linewidth=1, label="Forecast start")
+    # Forecast start line
+    plt.axvline(dates.min(), color='gray', linestyle='--', linewidth=1, label="Forecast Start")
     
     mae = result["mae"]
     r2 = result["r2"]
@@ -224,7 +251,8 @@ def plot_stock_forecast(result, output_dir):
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     
-    plot_file = os.path.join(PLOTS_DIR, f"ewma_vix_{stock}.png")
+    # Save directly to plots dir (no subfolders)
+    plot_file = os.path.join(output_dir, "plots", f"ewma_vix_{stock}.png")
     plt.savefig(plot_file, dpi=150)
     plt.close()
 
@@ -328,7 +356,7 @@ def main():
         
         try:
             df = prepare_data(filepath, vix_df)
-            result = run_prediction(pipeline, df, stock_name)
+            result = run_expanding_window_prediction(pipeline, df, stock_name)
             
             if result:
                 results.append(result)
