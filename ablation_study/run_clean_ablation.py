@@ -1,3 +1,4 @@
+
 import transformers
 try:
     from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
@@ -110,13 +111,20 @@ def load_and_prep_data(filepath):
         print(f"Error loading {filepath}: {e}")
         return None
 
-def calculate_metrics(y_true, y_pred):
-    """Calculate deterministic metrics."""
+def calculate_metrics(y_true, y_pred, n, p):
+    """Calculate deterministic metrics including Adjusted R2."""
     metrics = {}
     metrics['mae'] = mean_absolute_error(y_true, y_pred)
     metrics['mse'] = mean_squared_error(y_true, y_pred)
     metrics['rmse'] = np.sqrt(metrics['mse'])
     metrics['r2'] = r2_score(y_true, y_pred)
+    
+    # Adjusted R2
+    if n > p + 1:
+        metrics['adj_r2'] = 1 - (1 - metrics['r2']) * (n - 1) / (n - p - 1)
+    else:
+        metrics['adj_r2'] = np.nan
+        
     return metrics
 
 # Initialize Model
@@ -177,7 +185,7 @@ for filepath in csv_files:
         timestamp_column=DATE_COL
     )
     baseline_preds = baseline_forecast['0.5'].values
-    baseline_metrics = calculate_metrics(actuals, baseline_preds)
+    baseline_metrics = calculate_metrics(actuals, baseline_preds, len(actuals), 0)
     
     baseline_res = {
         'stock': stock_name,
@@ -187,6 +195,7 @@ for filepath in csv_files:
         'mse': baseline_metrics['mse'],
         'rmse': baseline_metrics['rmse'],
         'r2': baseline_metrics['r2'],
+        'adj_r2': baseline_metrics['adj_r2'],
         'time': time.time() - start_time
     }
     results.append(baseline_res)
@@ -214,7 +223,7 @@ for filepath in csv_files:
                 timestamp_column=DATE_COL
             )
             preds = forecast['0.5'].values
-            metrics = calculate_metrics(actuals, preds)
+            metrics = calculate_metrics(actuals, preds, len(actuals), 1)
             
             res = {
                 'stock': stock_name,
@@ -224,6 +233,7 @@ for filepath in csv_files:
                 'mse': metrics['mse'],
                 'rmse': metrics['rmse'],
                 'r2': metrics['r2'],
+                'adj_r2': metrics['adj_r2'],
                 'time': time.time() - start_time
             }
             results.append(res)
@@ -267,7 +277,7 @@ for filepath in csv_files:
                 timestamp_column=DATE_COL
             )
             preds = forecast['0.5'].values
-            metrics = calculate_metrics(actuals, preds)
+            metrics = calculate_metrics(actuals, preds, len(actuals), len(selected_feats))
             
             combo_res = {
                 'stock': stock_name,
@@ -277,6 +287,7 @@ for filepath in csv_files:
                 'mse': metrics['mse'],
                 'rmse': metrics['rmse'],
                 'r2': metrics['r2'],
+                'adj_r2': metrics['adj_r2'],
                 'time': time.time() - start_time
             }
             results.append(combo_res)
