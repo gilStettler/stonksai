@@ -237,6 +237,7 @@ def plot_aggregate_metrics(stock_metrics, output_dir):
     maes = [m["MAE"] for m in stock_metrics]
     rmses = [m["RMSE"] for m in stock_metrics]
     r2s = [m["R2"] for m in stock_metrics]
+    adj_r2s = [m["Adj_R2"] for m in stock_metrics]
     
     # MAE
     ax = axes[0, 0]
@@ -267,17 +268,18 @@ def plot_aggregate_metrics(stock_metrics, output_dir):
     ax.set_ylabel('R²')
     ax.set_title('R² by Stock')
     ax.axhline(np.mean(r2s), color='blue', linestyle='--', label=f'Mean: {np.mean(r2s):.4f}')
-    ax.axhline(0.9, color='green', linestyle=':', alpha=0.5, label='90% threshold')
     ax.legend()
     
-    # Predictions count
+    # Adjusted R² (Replaces N_Predictions)
     ax = axes[1, 1]
-    n_preds = [m["N_Predictions"] for m in stock_metrics]
-    ax.bar(range(len(stocks)), n_preds, color='purple')
+    colors_adj = ['green' if r > 0.9 else 'orange' if r > 0.8 else 'red' for r in adj_r2s]
+    ax.bar(range(len(stocks)), adj_r2s, color=colors_adj)
     ax.set_xticks(range(len(stocks)))
     ax.set_xticklabels(stocks, rotation=45, ha='right', fontsize=8)
-    ax.set_ylabel('N Predictions')
-    ax.set_title('Predictions per Stock')
+    ax.set_ylabel('Adj R²')
+    ax.set_title('Adjusted R² by Stock')
+    ax.axhline(np.mean(adj_r2s), color='blue', linestyle='--', label=f'Mean: {np.mean(adj_r2s):.4f}')
+    ax.legend()
     
     plt.suptitle("EWMA + VIX Volatility Forecast Metrics (K=2)", fontsize=14, fontweight='bold')
     plt.tight_layout()
