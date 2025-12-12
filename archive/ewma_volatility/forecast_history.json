@@ -1,0 +1,192 @@
+{
+  "data": {
+    "ABB": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.013846713118255138,
+        "confidence_low": 0.01352050993591547,
+        "confidence_high": 0.014163662679493427,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.013637401381608617,
+        "generated_at": "2025-12-12T13:58:29.889417"
+      }
+    ],
+    "Alcon": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.020555343478918076,
+        "confidence_low": 0.02002239227294922,
+        "confidence_high": 0.021036231890320778,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.02075154891749751,
+        "generated_at": "2025-12-12T13:58:30.165899"
+      }
+    ],
+    "Geberit": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.011907546781003475,
+        "confidence_low": 0.01158436294645071,
+        "confidence_high": 0.012195223942399025,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.0120061349449701,
+        "generated_at": "2025-12-12T13:58:30.458032"
+      }
+    ],
+    "Givaudan": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.0124779948964715,
+        "confidence_low": 0.01222857553511858,
+        "confidence_high": 0.01274561882019043,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.012507943783981373,
+        "generated_at": "2025-12-12T13:58:30.762017"
+      }
+    ],
+    "Holcim": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.0181955024600029,
+        "confidence_low": 0.017545398324728012,
+        "confidence_high": 0.018839115276932716,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.017285718395563938,
+        "generated_at": "2025-12-12T13:58:31.064038"
+      }
+    ],
+    "Kuehne": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.014672216027975082,
+        "confidence_low": 0.014303328469395638,
+        "confidence_high": 0.01503793802112341,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.0149039954037974,
+        "generated_at": "2025-12-12T13:58:31.365209"
+      }
+    ],
+    "Logitech": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.01886950060725212,
+        "confidence_low": 0.01833389326930046,
+        "confidence_high": 0.019394490867853165,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.01904890185874417,
+        "generated_at": "2025-12-12T13:58:31.674948"
+      }
+    ],
+    "Lonza": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.013241350650787354,
+        "confidence_low": 0.012696951627731323,
+        "confidence_high": 0.013874534517526627,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.012940815972985362,
+        "generated_at": "2025-12-12T13:58:32.030742"
+      }
+    ],
+    "Nestle": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.014007220976054668,
+        "confidence_low": 0.013736817054450512,
+        "confidence_high": 0.014298764988780022,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.014120194413590796,
+        "generated_at": "2025-12-12T13:58:32.453547"
+      }
+    ],
+    "Novartis": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.012641329318284988,
+        "confidence_low": 0.01236039400100708,
+        "confidence_high": 0.01291625015437603,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.012757925599066964,
+        "generated_at": "2025-12-12T13:58:32.801260"
+      }
+    ],
+    "Partners": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.015510735101997852,
+        "confidence_low": 0.015169809572398663,
+        "confidence_high": 0.015992484986782074,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.015012898550325317,
+        "generated_at": "2025-12-12T13:58:33.038587"
+      }
+    ],
+    "Roche": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.019612090662121773,
+        "confidence_low": 0.019203342497348785,
+        "confidence_high": 0.01999671757221222,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.019837044468162243,
+        "generated_at": "2025-12-12T13:58:33.381589"
+      }
+    ],
+    "Sika": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.01799386739730835,
+        "confidence_low": 0.017436493188142776,
+        "confidence_high": 0.01846456155180931,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.018055056369688145,
+        "generated_at": "2025-12-12T13:58:33.626286"
+      }
+    ],
+    "Swiss": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.010787706822156906,
+        "confidence_low": 0.010462230071425438,
+        "confidence_high": 0.01112382672727108,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.010719320249975569,
+        "generated_at": "2025-12-12T13:58:33.904697"
+      }
+    ],
+    "Swisscom": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.008936426602303982,
+        "confidence_low": 0.00872243382036686,
+        "confidence_high": 0.009167739190161228,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.009007452403828088,
+        "generated_at": "2025-12-12T13:58:34.219086"
+      }
+    ],
+    "UBS": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.014385726302862167,
+        "confidence_low": 0.014003190211951733,
+        "confidence_high": 0.014704459346830845,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.014283911371830995,
+        "generated_at": "2025-12-12T13:58:34.464047"
+      }
+    ],
+    "Zurich": [
+      {
+        "target_date": "2025-11-29 00:00:00",
+        "forecast_value": 0.00877576693892479,
+        "confidence_low": 0.008505411446094513,
+        "confidence_high": 0.009028264321386814,
+        "last_known_date": "2025-11-28 00:00:00",
+        "last_known_vol": 0.00873844290217664,
+        "generated_at": "2025-12-12T13:58:34.736112"
+      }
+    ]
+  },
+  "last_updated": "2025-12-12T13:58:34.737136"
+}

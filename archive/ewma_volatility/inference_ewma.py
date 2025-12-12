@@ -99,7 +99,8 @@ def prepare_data(filepath, vix_df):
     df["ewma_vol_lag_1"] = df["ewma_vol"].shift(1)
     
     # Merge VIX
-    df = df.merge(vix_df[['date', 'vix_lag_1']], left_on=DATE_COL, right_on='date', how='left')
+    # We keep 'vix' (raw) to construct the next day's features easily
+    df = df.merge(vix_df[['date', 'vix', 'vix_lag_1']], left_on=DATE_COL, right_on='date', how='left')
     df = df.drop(columns=['date'], errors='ignore')
     
     # Business day reindexing
@@ -212,6 +213,120 @@ def run_expanding_window_prediction(pipeline, df, stock_name):
         "context_df": context_df,
         "future_df": None
     }
+
+
+def predict_next_day(pipeline, df, stock_name):
+    """
+    Predicts the volatility for the NEXT business day (T+1) based on the latest available data (T).
+    Used for live inference in UI.
+    """
+    # Ensure sorted
+    df = df.sort_values(DATE_COL).reset_index(drop=True)
+    
+    # 1. Get latest state (Day T)
+    last_row = df.iloc[-1]
+    last_date = last_row[DATE_COL]
+    
+    # 2. Construct Future Features (Day T+1)
+    # The 'lag_1' features for tomorrow are the 'current' values of today.
+    
+    # 2. Resample Context to 'D' (Daily) to avoid 'Business Day' validation headaches
+    # Chronos handles 'D' robustly. We ffill values over weekends.
+    context_df = df.iloc[-600:].copy() # increased slightly
+    context_df = context_df.set_index(DATE_COL).resample('D').ffill().reset_index()
+    # Now context ends on the calendar day before 'next_date' (if we fix the logic)
+    
+    # Update last_row to be the actual last calendar day (Sunday if today is Monday? No).
+    # If original data ends Friday (Nov 28), resample('D') adds Sat (29), Sun (30).
+    # Last row of context is now Sun (30).
+    last_row_D = context_df.iloc[-1]
+    last_date_D = last_row_D[DATE_COL]
+    
+    # Next prediction day is Monday (Dec 1). 
+    # This is exactly last_date_D + 1 Day.
+    next_date_D = last_date_D + pd.Timedelta(days=1)
+    
+    # Does this match the business logic?
+    # Yes, we want to predict for Dec 1.
+    # Input features: We need features for Dec 1.
+    # Features are 'ewma_vol_lag_1' -> EWMA of previous day.
+    # Previous day is Sunday. Sunday's EWMA is Friday's EWMA (ffilled).
+    # So using Friday's EWMA as lag feature for Monday is correct in this 'D' world.
+    
+    # Future Frame (5 days for robust freq inference)
+    future_rows = []
+    for i in range(5):
+        d = next_date_D + pd.Timedelta(days=i)
+        future_rows.append({
+            ID_COL: last_row_D[ID_COL],
+            DATE_COL: d,
+            "ewma_vol_lag_1": last_row_D["ewma_vol"],
+            "vix_lag_1": last_row_D["vix"]
+        })
+    
+    future_df = pd.DataFrame(future_rows)
+    
+    context_cols = [ID_COL, DATE_COL, TARGET_COL] + FEATURE_COLS
+    future_cols = [ID_COL, DATE_COL] + FEATURE_COLS
+    
+    # 4. Predict
+    try:
+        pred_df = pipeline.predict_df(
+            context_df[context_cols],
+            future_df=future_df[future_cols],
+            prediction_length=5, # Request 5 steps
+            quantile_levels=[0.1, 0.5, 0.9],
+            id_column=ID_COL,
+            timestamp_column=DATE_COL,
+            target=TARGET_COL
+        )
+        
+        forecast_val = pred_df["0.5"].iloc[0]
+        q10 = pred_df["0.1"].iloc[0]
+        q90 = pred_df["0.9"].iloc[0]
+        
+        # We return the target date (which is next_date_D)
+        return {
+            "stock": stock_name,
+            "forecast_date": next_date_D,
+            "forecast_value": forecast_val,
+            "confidence_interval": (q10, q90),
+            "last_date": last_date, # Original business date from input
+            "last_actual_vol": last_row["ewma_vol"],
+            "status": "success"
+        }
+    except Exception as e:
+        return {
+            "stock": stock_name,
+            "status": "error",
+            "error": str(e)
+        }
+
+def get_single_stock_forecast(ticker, pipeline=None):
+    """
+    Helper for UI: Load data and predict for a single stock.
+    If pipeline is not provided, it loads it (slow).
+    """
+    # Resolve Stock File
+    # Assumes ticker is like "ABB" and file is "data_ABB_....csv"
+    search_pattern = os.path.join(DATA_DIR, f"data_{ticker}_*.csv")
+    files = glob.glob(search_pattern)
+    if not files:
+        return {"status": "error", "error": f"No data found for {ticker}"}
+    
+    filepath = files[0]
+    
+    # 1. Load Resources if needed
+    if pipeline is None:
+        pipeline = Chronos2Pipeline.from_pretrained("amazon/chronos-2", device_map=DEVICE)
+        
+    vix_df = load_vix()
+    
+    # 2. Prepare Data
+    df = prepare_data(filepath, vix_df)
+    
+    # 3. Predict
+    return predict_next_day(pipeline, df, ticker)
 
 
 def plot_stock_forecast(result, output_dir):

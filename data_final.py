@@ -15,6 +15,7 @@ Requirements:
 
 import requests
 import pandas as pd
+import os
 
 # --------------------------------------------------------------------
 # CONFIGURATION
@@ -94,50 +95,28 @@ def get_daily_ohlcv_from_alpha_vantage(symbol: str) -> pd.DataFrame:
     return df
 
 
+
+import yfinance as yf
+
 def get_vix_from_fred() -> pd.DataFrame:
     """
-    Download daily VIX data from FRED.
-
-    Returns a DataFrame with:
-    - index: Date (datetime)
-    - column: VIX (float)
+    Download daily VIX data from Yahoo Finance (^VIX).
+    Renamed keeping function signature compatible, but using yfinance internally.
     """
-    # Prepare the query parameters for FRED
-    params = {
-        "series_id": "VIXCLS",        # VIX closing price
-        "api_key": FRED_API_KEY,
-        "file_type": "json"           # we want JSON back
-    }
-
-    # Send HTTP GET request
-    response = requests.get(FRED_URL, params=params)
-    data = response.json()
-
-    # The observations are stored as a list under "observations"
-    if "observations" not in data:
-        raise ValueError("FRED response does not contain 'observations' for VIX.")
-
-    observations = data["observations"]
-
-    # Convert the list of observations to a DataFrame
-    vix_df = pd.DataFrame(observations)
-
-    # We only need date and value columns
-    vix_df = vix_df[["date", "value"]]
-
-    # Convert date to datetime and set as index
-    vix_df["date"] = pd.to_datetime(vix_df["date"])
-    vix_df = vix_df.set_index("date")
-
-    # Convert VIX value to float (missing values are set to NaN)
-    vix_df["value"] = pd.to_numeric(vix_df["value"], errors="coerce")
-
-    # Rename column to VIX
-    vix_df = vix_df.rename(columns={"value": "VIX"})
-
-    # Sort by date just to be safe
+    print("Fetching VIX from Yahoo Finance...")
+    vix = yf.Ticker("^VIX")
+    # Get max history to be safe
+    hist = vix.history(period="max")
+    
+    # yfinance returns index as Datetime with timezone. We need timezone-naive.
+    hist.index = hist.index.tz_localize(None)
+    
+    vix_df = hist[["Close"]].rename(columns={"Close": "VIX"})
+    vix_df.index.name = "date"
     vix_df = vix_df.sort_index()
-
+    
+    # Create 'value' column as alias if needed by downstream, or just VIX
+    # Returns DataFrame with index 'date' and column 'VIX'
     return vix_df
 
 
@@ -151,6 +130,12 @@ def main():
     # ----------------------------------------------------------------
     print("Downloading VIX data from FRED...")
     vix_df = get_vix_from_fred()
+
+    # Create output directory
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, "data")
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    print(f"Saving data to: {OUTPUT_DIR}")
 
     # ----------------------------------------------------------------
     # 2) Loop over all tickers, download OHLCV, compute returns,
@@ -182,8 +167,12 @@ def main():
         # 2d) Save to CSV with one file per symbol
         #     Columns: OHLCV, Return, VIX per day
         # --------------------------------------------
-        output_filename = f"{symbol}.csv"
-        merged_df.to_csv(output_filename, index_label="Date")
+        # Sanitize filename (remove special chars if any)
+        safe_symbol = symbol.replace("/", "_").replace("\\", "_")
+        output_filename = os.path.join(OUTPUT_DIR, f"data_{safe_symbol}.csv")
+        merged_df.to_csv(output_filename, index_label="timestamp") # using 'timestamp' as header for date match
+
+        print(f"Saved {output_filename}")
 
         print(f"Saved {output_filename}")
 
