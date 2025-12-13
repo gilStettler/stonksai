@@ -1,172 +1,191 @@
+#!/usr/bin/env python3
+"""
+generate_daily_forecasts.py
+
+Creates:
+- ONE live prediction for NEXT TRADING DAY (T+1 business day)
+- PLUS last 5 historical next-trading-day predictions (backtests)
+- Writes a daily snapshot forecast_history_YYYY-MM-DD.json
+- Copies snapshot into forecast_history.json (latest)
+
+Reads paths from .env in repo root:
+  FORECAST_STORE_DIR=jobs/data_out
+  STOCK_CSV_DIR=jobs/data_csv  (may contain subfolders like latest/)
+"""
+
 import os
 import json
 import glob
-import platform
-import warnings
-import argparse
-from pathlib import Path
+import time
+import tempfile
 from datetime import datetime
 
-import pandas as pd
 import numpy as np
+import pandas as pd
+from pandas.tseries.offsets import BDay
 from tqdm import tqdm
-from chronos import Chronos2Pipeline
 import yfinance as yf
 
+import torch
 from dotenv import load_dotenv
-
-# =========================================================
-# Repo-root aware .env loading + robust path resolving
-# =========================================================
-
-SCRIPT_DIR = Path(__file__).resolve().parent          # .../stonksai/jobs
-REPO_ROOT = SCRIPT_DIR.parent                         # .../stonksai
-ENV_PATH = REPO_ROOT / ".env"
-
-if ENV_PATH.exists():
-    load_dotenv(dotenv_path=ENV_PATH)
-else:
-    # Fallback: still allow running if user exported env vars already
-    print(f"[WARN] .env not found at: {ENV_PATH} (continuing with process env)")
-
-def resolve_env_path(var_name: str, default_rel: str) -> Path:
-    """
-    Read a path from env. If it's relative, resolve it relative to REPO_ROOT.
-    This avoids cwd-dependent bugs (uvicorn started from backend/, etc.).
-    """
-    raw = os.getenv(var_name, default_rel)
-    p = Path(raw)
-    return p if p.is_absolute() else (REPO_ROOT / p).resolve()
+from chronos import Chronos2Pipeline
 
 
 # =========================================================
-# Auth helper (optional)
+# PATHS / ENV
 # =========================================================
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))          # .../root/jobs
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))       # .../root
 
-def require_job_auth(passed_token: str | None):
-    expected = os.getenv("JOB_TRIGGER_TOKEN", "").strip()
-    if not expected:
-        return
-    got = (passed_token or os.getenv("JOB_RUN_TOKEN", "")).strip()
-    if not got or got != expected:
-        raise SystemExit("[FATAL] Invalid or missing job token. Provide --token or set JOB_RUN_TOKEN.")
+ENV_PATH = os.path.join(ROOT_DIR, ".env")
+load_dotenv(dotenv_path=ENV_PATH)
 
+FORECAST_STORE_DIR = os.getenv("FORECAST_STORE_DIR", "jobs/data_out")
+STOCK_CSV_DIR = os.getenv("STOCK_CSV_DIR", "jobs/data_csv")
 
-# =========================================================
-# Device auto-selection
-# =========================================================
+FORECAST_DIR = os.path.join(ROOT_DIR, FORECAST_STORE_DIR)
+CSV_DIR = os.path.join(ROOT_DIR, STOCK_CSV_DIR)
 
-def pick_best_device() -> str:
-    override = os.getenv("CHRONOS_DEVICE", "").strip().lower()
-    if override in {"cpu", "cuda", "mps"}:
-        print(f"[device] Using override CHRONOS_DEVICE={override}")
-        return override
+os.makedirs(FORECAST_DIR, exist_ok=True)
+SNAPSHOT_DIR = os.path.join(FORECAST_DIR, "snapshots")
+os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 
-    try:
-        import torch
-    except Exception as e:
-        print(f"[device] torch not available ({e}). Using cpu.")
-        return "cpu"
+LATEST_FILE = os.path.join(FORECAST_DIR, "forecast_history.json")
+LOCK_FILE = os.path.join(FORECAST_DIR, ".forecast_job.lock")
 
-    if torch.cuda.is_available():
-        try:
-            name = torch.cuda.get_device_name(0)
-        except Exception:
-            name = "CUDA GPU"
-        print(f"[device] CUDA available: {name}")
-        return "cuda"
+print(f"✅ ROOT_DIR: {ROOT_DIR}")
+print(f"✅ .env: {ENV_PATH} (exists={os.path.exists(ENV_PATH)})")
+print(f"📂 CSV INPUT DIR: {CSV_DIR} (exists={os.path.exists(CSV_DIR)})")
+print(f"📁 FORECAST OUTPUT DIR: {FORECAST_DIR}")
+print(f"📝 HISTORY FILE: {LATEST_FILE}")
+print("=" * 60)
 
-    is_mac = platform.system().lower() == "darwin"
-    mps_ok = False
-    if is_mac and hasattr(torch.backends, "mps"):
-        try:
-            mps_ok = torch.backends.mps.is_available() and torch.backends.mps.is_built()
-        except Exception:
-            mps_ok = False
-
-    if mps_ok:
-        warnings.filterwarnings(
-            "ignore",
-            message=".*'pin_memory' argument is set as true but not supported on MPS.*",
-            category=UserWarning,
-        )
-        print("[device] MPS available. Using mps.")
-        return "mps"
-
-    print("[device] Using cpu.")
-    return "cpu"
-
-
-DEVICE = pick_best_device()
 
 # =========================================================
-# Paths (from .env, resolved against repo root)
+# CONFIG
 # =========================================================
-
-# CSV input directory (should point to latest folder)
-# Recommended in .env: STOCK_CSV_DIR=jobs/data_csv/latest
-CSV_DIR = resolve_env_path("STOCK_CSV_DIR", "jobs/data_csv/latest")
-
-# Forecast output dir
-# Recommended in .env: FORECAST_STORE_DIR=jobs/data_out
-OUTPUT_DIR = resolve_env_path("FORECAST_STORE_DIR", "jobs/data_out")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-DATE_STR = datetime.utcnow().strftime("%Y-%m-%d")
-VERSIONED_FILE = OUTPUT_DIR / f"forecast_history-{DATE_STR}.json"
-LATEST_FILE = OUTPUT_DIR / "forecast_history.json"
-
-# =========================================================
-# Model configuration
-# =========================================================
-
 DATE_COL = "timestamp"
 TARGET_COL = "ewma_vol"
 ID_COL = "id"
 DEFAULT_ID = "series_1"
-FREQ = "B"
+
 LAMBDA = 0.94
 FEATURE_COLS = ["ewma_vol_lag_1", "vix_lag_1"]
 
+# Desired behavior:
+DAYS_BACK = 5
+
+# IMPORTANT:
+# Chronos expects timestamps consistent with inferred freq.
+# We resample context to daily ("D"), so future_df MUST also be daily.
+# We then pick the prediction step matching NEXT BUSINESS DAY.
+INTERNAL_PRED_LEN_FOR_FREQ = 7  # must cover weekends safely (Fri -> Mon needs 3 steps)
+
+
+def pick_device() -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+DEVICE_PREF = pick_device()
+
 
 # =========================================================
-# Helpers
+# HELPERS
 # =========================================================
+def to_datestr(x) -> str | None:
+    if x is None:
+        return None
+    return pd.to_datetime(x).strftime("%Y-%m-%d")
 
-def calculate_ewma_volatility(returns: pd.Series, lambda_=0.94) -> pd.Series:
-    ewma_var = np.zeros(len(returns))
-    returns_filled = returns.fillna(0).values
-    ewma_var[0] = returns_filled[0] ** 2
-    for t in range(1, len(returns)):
-        ewma_var[t] = lambda_ * ewma_var[t - 1] + (1 - lambda_) * (returns_filled[t] ** 2)
+
+def atomic_write_json(path: str, data: dict) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=".tmp_", suffix=".json", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+
+def acquire_lock(lock_path: str, stale_after_seconds: int = 3600) -> bool:
+    try:
+        if os.path.exists(lock_path):
+            age = time.time() - os.path.getmtime(lock_path)
+            if age > stale_after_seconds:
+                try:
+                    os.remove(lock_path)
+                except Exception:
+                    pass
+
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"pid": os.getpid(), "created_at": time.time()}))
+        return True
+    except FileExistsError:
+        return False
+
+
+def release_lock(lock_path: str) -> None:
+    try:
+        if os.path.exists(lock_path):
+            os.remove(lock_path)
+    except Exception:
+        pass
+
+
+def is_weekend_datestr(yyyy_mm_dd: str) -> bool:
+    try:
+        d = pd.to_datetime(yyyy_mm_dd)
+        return d.weekday() >= 5
+    except Exception:
+        return False
+
+
+# =========================================================
+# DATA PREP
+# =========================================================
+def calculate_ewma_volatility(returns: pd.Series, lambda_: float = 0.94) -> pd.Series:
+    n = len(returns)
+    ewma_var = np.zeros(n, dtype=float)
+    r = returns.fillna(0.0).values
+    ewma_var[0] = r[0] ** 2
+    for t in range(1, n):
+        ewma_var[t] = lambda_ * ewma_var[t - 1] + (1 - lambda_) * (r[t] ** 2)
     return pd.Series(np.sqrt(ewma_var), index=returns.index)
 
 
 def load_vix() -> pd.DataFrame:
-    """
-    VIX is already in your stock CSVs, but we fetch ^VIX again to ensure we can
-    build consistent lag features even if CSV gaps exist.
-    """
-    print("[vix] Fetching VIX from Yahoo Finance (^VIX) for lags...")
+    print("Fetching VIX from Yahoo Finance...")
     vix = yf.Ticker("^VIX")
     hist = vix.history(period="2y")
-    if hist.empty:
-        raise RuntimeError("VIX history returned empty from yfinance.")
     hist.index = hist.index.tz_localize(None)
 
-    vix_df = hist[["Close"]].rename(columns={"Close": "vix"})
-    vix_df["date"] = vix_df.index
+    vix_df = hist[["Close"]].rename(columns={"Close": "vix"}).copy()
+    vix_df["date"] = pd.to_datetime(vix_df.index).normalize()
     vix_df = vix_df.reset_index(drop=True)
+
     vix_df["vix"] = vix_df["vix"] / 100.0
+    vix_df = vix_df.sort_values("date").reset_index(drop=True)
     vix_df["vix_lag_1"] = vix_df["vix"].shift(1)
     return vix_df
 
 
-def prepare_data(filepath: Path, vix_df: pd.DataFrame) -> pd.DataFrame:
+def prepare_data(filepath: str, vix_df: pd.DataFrame) -> pd.DataFrame:
     df = pd.read_csv(filepath)
-
     if DATE_COL not in df.columns:
-        raise ValueError(f"Missing '{DATE_COL}' column in {filepath}")
+        raise ValueError(f"Missing {DATE_COL} in {filepath}")
 
     df[DATE_COL] = pd.to_datetime(df[DATE_COL])
     df = df.sort_values(DATE_COL).reset_index(drop=True)
@@ -174,185 +193,243 @@ def prepare_data(filepath: Path, vix_df: pd.DataFrame) -> pd.DataFrame:
     if ID_COL not in df.columns:
         df[ID_COL] = DEFAULT_ID
 
-    close_col = "Close" if "Close" in df.columns else ("close" if "close" in df.columns else None)
-    if close_col is None:
-        raise ValueError(f"Missing Close/close column in {filepath}")
+    df["date"] = pd.to_datetime(df[DATE_COL]).dt.normalize()
 
-    df["log_return"] = np.log(df[close_col] / df[close_col].shift(1))
-    df["ewma_vol"] = calculate_ewma_volatility(df["log_return"], LAMBDA)
-    df["ewma_vol_lag_1"] = df["ewma_vol"].shift(1)
+    close_col = "Close" if "Close" in df.columns else "close"
+    if close_col not in df.columns:
+        raise ValueError(f"Missing Close/close in {filepath}")
 
-    # merge vix for lag features
-    df = df.merge(
-        vix_df[["date", "vix", "vix_lag_1"]],
-        left_on=DATE_COL,
-        right_on="date",
-        how="left",
-    ).drop(columns=["date"], errors="ignore")
+    if "log_return" not in df.columns:
+        df["log_return"] = np.log(df[close_col] / df[close_col].shift(1))
 
-    # business day reindex
-    pieces = []
-    for sid, g in df.groupby(ID_COL):
-        g = g.set_index(DATE_COL)
-        idx = pd.date_range(g.index.min(), g.index.max(), freq=FREQ)
-        g = g.reindex(idx).ffill()
-        g[ID_COL] = sid
-        g.index.name = DATE_COL
-        pieces.append(g.reset_index())
+    df[TARGET_COL] = calculate_ewma_volatility(df["log_return"], LAMBDA)
+    df["ewma_vol_lag_1"] = df[TARGET_COL].shift(1)
 
-    out = pd.concat(pieces, ignore_index=True)
+    v = vix_df[["date", "vix", "vix_lag_1"]].copy()
+    df = df.merge(v, on="date", how="left")
 
-    # Ensure required cols exist
-    needed = [TARGET_COL, "ewma_vol_lag_1", "vix", "vix_lag_1"]
-    out = out.dropna(subset=needed)
-    return out
+    # critical: fill VIX gaps after merge
+    df = df.sort_values("date").reset_index(drop=True)
+    df["vix"] = df["vix"].ffill()
+    df["vix_lag_1"] = df["vix_lag_1"].ffill()
+
+    required = [DATE_COL, TARGET_COL] + FEATURE_COLS
+    df = df.dropna(subset=required).reset_index(drop=True)
+    df = df.drop(columns=["date"], errors="ignore")
+    return df
 
 
-def predict_next_day(pipeline: Chronos2Pipeline, df: pd.DataFrame) -> dict:
+# =========================================================
+# PREDICTION (NEXT TRADING DAY)
+# =========================================================
+def predict_next_trading_day(pipeline: Chronos2Pipeline, df: pd.DataFrame) -> dict:
+    """
+    Predict for NEXT BUSINESS DAY (BDay(1)), while keeping Chronos timestamps DAILY.
+
+    Why:
+    - context is resampled to daily ("D")
+    - Chronos validates future timestamps based on expected daily continuation
+    - so future_df must also be daily
+    - we then SELECT the step whose timestamp == next business day
+    """
     df = df.sort_values(DATE_COL).reset_index(drop=True)
 
+    # last TRADING day from original data
+    last_trading_ts = pd.to_datetime(df[DATE_COL].iloc[-1]).normalize()
+    next_bd = last_trading_ts + BDay(1)
+
+    # daily context continuity for Chronos
     context_df = df.iloc[-600:].copy()
     context_df = context_df.set_index(DATE_COL).resample("D").ffill().reset_index()
 
-    last_row = context_df.iloc[-1]
-    next_date = last_row[DATE_COL] + pd.Timedelta(days=1)
+    # anchor for daily future grid (must be the context's last timestamp)
+    last_ctx = context_df.iloc[-1]
+    last_ctx_date = pd.to_datetime(last_ctx[DATE_COL]).normalize()
 
-    future_df = pd.DataFrame([{
-        ID_COL: last_row[ID_COL],
-        DATE_COL: next_date,
-        "ewma_vol_lag_1": last_row["ewma_vol"],
-        "vix_lag_1": last_row["vix"],
-    }])
+    # build DAILY future timestamps (this makes Chronos validation pass)
+    future_rows = []
+    for i in range(1, INTERNAL_PRED_LEN_FOR_FREQ + 1):
+        future_rows.append({
+            ID_COL: last_ctx[ID_COL],
+            DATE_COL: last_ctx_date + pd.Timedelta(days=i),  # DAILY, not BDay
+            "ewma_vol_lag_1": float(last_ctx[TARGET_COL]),
+            "vix_lag_1": float(last_ctx["vix"]),
+        })
+    future_df = pd.DataFrame(future_rows)
 
-    pred = pipeline.predict_df(
-        context_df[[ID_COL, DATE_COL, TARGET_COL] + FEATURE_COLS],
-        future_df=future_df[[ID_COL, DATE_COL] + FEATURE_COLS],
-        prediction_length=1,
+    context_cols = [ID_COL, DATE_COL, TARGET_COL] + FEATURE_COLS
+    future_cols = [ID_COL, DATE_COL] + FEATURE_COLS
+
+    pred_df = pipeline.predict_df(
+        context_df[context_cols],
+        future_df=future_df[future_cols],
+        prediction_length=INTERNAL_PRED_LEN_FOR_FREQ,
         quantile_levels=[0.1, 0.5, 0.9],
         id_column=ID_COL,
         timestamp_column=DATE_COL,
         target=TARGET_COL,
+        # keep validation ON (we fixed timestamps properly)
     )
 
+    # select the row matching next business day
+    pred_ts = pd.to_datetime(pred_df[DATE_COL]).dt.normalize()
+    idx = pred_ts[pred_ts == next_bd].index
+
+    if len(idx) == 0:
+        # as a safety net (e.g. around holidays), extend horizon by picking first date > next_bd
+        idx = pred_ts[pred_ts > next_bd].index
+        if len(idx) == 0:
+            raise RuntimeError("Could not locate next business day prediction in prediction window.")
+        use_i = idx[0]
+        chosen_date = pred_ts.loc[use_i]
+    else:
+        use_i = idx[0]
+        chosen_date = next_bd
+
     return {
-        "target_date": next_date,
-        "forecast_value": float(pred["0.5"].iloc[0]),
-        "confidence_low": float(pred["0.1"].iloc[0]),
-        "confidence_high": float(pred["0.9"].iloc[0]),
-        "last_known_date": last_row[DATE_COL],
-        "last_known_vol": float(last_row["ewma_vol"]),
+        "target_date": to_datestr(chosen_date),
+        "forecast_value": float(pred_df["0.5"].loc[use_i]),
+        "confidence_low": float(pred_df["0.1"].loc[use_i]),
+        "confidence_high": float(pred_df["0.9"].loc[use_i]),
+        "last_known_date": to_datestr(last_trading_ts),
+        "last_known_vol": float(df[TARGET_COL].iloc[-1]),
     }
 
 
-def atomic_write_json(path: Path, payload: dict):
-    tmp = Path(str(path) + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, path)
-
-
-def load_history() -> dict:
-    if LATEST_FILE.exists():
-        try:
-            with open(LATEST_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"[history] Warning reading latest history ({e}). Starting fresh.")
-    return {"data": {}}
-
-
-def date_key(dt) -> str:
-    return str(pd.to_datetime(dt).date())
-
-
-def iso_date(dt) -> str:
-    return (
-        pd.to_datetime(dt)
-        .to_pydatetime()
-        .replace(hour=0, minute=0, second=0, microsecond=0)
-        .isoformat()
-    )
-
-
 # =========================================================
-# Main
+# MAIN
 # =========================================================
-
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--token", default=None, help="Job trigger token (optional; required if JOB_TRIGGER_TOKEN is set).")
-    args = parser.parse_args()
-
-    require_job_auth(args.token)
-
+    print("🚀 STARTING DAILY FORECAST JOB (T+1 + T-5 HISTORY)")
     print("=" * 60)
-    print("DAILY VOLATILITY FORECAST GENERATOR")
-    print("=" * 60)
-    print(f"[repo] REPO_ROOT: {REPO_ROOT}")
-    print(f"[in]  CSV_DIR:    {CSV_DIR}")
-    print(f"[out] OUTPUT_DIR:{OUTPUT_DIR}")
-    print(f"[out] VERSIONED: {VERSIONED_FILE}")
-    print(f"[out] LATEST:    {LATEST_FILE}")
-    print(f"[device] {DEVICE}")
 
-    if not CSV_DIR.exists():
-        raise SystemExit(f"[FATAL] CSV_DIR not found: {CSV_DIR}")
+    if not acquire_lock(LOCK_FILE):
+        print("⚠️ Forecast job already running (lock exists). Exiting.")
+        return
 
-    csv_files = sorted(CSV_DIR.glob("data_*.csv"))
-    print(f"[in] Found {len(csv_files)} CSV files.")
-    if not csv_files:
-        raise SystemExit("[FATAL] No CSVs found (pattern data_*.csv). Run data_final.py first.")
+    try:
+        pipeline = Chronos2Pipeline.from_pretrained("amazon/chronos-2", device_map="auto")
+        print(f"✅ Model loaded (preferred device: {DEVICE_PREF})")
 
-    print("[model] Loading Chronos...")
-    pipeline = Chronos2Pipeline.from_pretrained("amazon/chronos-2", device_map=DEVICE)
+        vix_df = load_vix()
 
-    vix_df = load_vix()
+        if os.path.exists(LATEST_FILE):
+            with open(LATEST_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        else:
+            history = {"data": {}}
 
-    history = load_history()
-    history.setdefault("data", {})
+        history["last_updated"] = datetime.now().isoformat()
+        now_utc = datetime.utcnow().isoformat() + "Z"
 
-    for fp in tqdm(csv_files, desc="Generating Forecasts"):
-        stock = fp.stem.replace("data_", "")
-        try:
-            df = prepare_data(fp, vix_df)
-            if len(df) < 100:
-                print(f"[SKIP] {stock}: not enough rows ({len(df)})")
-                continue
+        csv_files = sorted(glob.glob(os.path.join(CSV_DIR, "**", "data_*.csv"), recursive=True))
+        if not csv_files:
+            print(f"⚠️ No CSV files found in {CSV_DIR}. Expected pattern: **/data_*.csv")
+            return
 
-            res = predict_next_day(pipeline, df)
+        for fp in tqdm(csv_files, desc="Forecasting Stocks"):
+            symbol = os.path.basename(fp).replace("data_", "").replace(".csv", "")
 
-            actual_row = df[df[DATE_COL] == res["target_date"]]
-            actual_value = float(actual_row.iloc[0][TARGET_COL]) if not actual_row.empty else None
+            try:
+                full_df = prepare_data(fp, vix_df)
+                if len(full_df) < 80:
+                    continue
 
-            record = {
-                "target_date": iso_date(res["target_date"]),
-                "forecast_value": res["forecast_value"],
-                "confidence_low": res["confidence_low"],
-                "confidence_high": res["confidence_high"],
-                "actual_value": actual_value,
-                "last_known_date": iso_date(res["last_known_date"]),
-                "last_known_vol": res["last_known_vol"],
-                "generated_at": datetime.utcnow().isoformat() + "Z",
-                "type": "forecast_next_day",
-            }
+                if symbol not in history["data"]:
+                    history["data"][symbol] = []
 
-            history["data"].setdefault(stock, [])
-            merged = {date_key(x["target_date"]): x for x in history["data"][stock]}
-            merged[date_key(record["target_date"])] = record
-            history["data"][stock] = sorted(merged.values(), key=lambda x: x["target_date"])
+                # map existing by (target_date, type)
+                existing = {}
+                for r in history["data"][symbol]:
+                    t = r.get("type")
+                    if t not in {"forecast_next_day", "backtest_next_day"}:
+                        continue
+                    td = to_datestr(r.get("target_date"))
+                    if not td:
+                        continue
 
-            print(f"[OK] {stock}: {record['forecast_value']:.4f}")
+                    r2 = dict(r)
+                    r2["target_date"] = td
+                    r2["last_known_date"] = to_datestr(r.get("last_known_date"))
 
-        except Exception as e:
-            print(f"[ERR] {stock}: {e}")
+                    if t == "backtest_next_day" and r2.get("actual_value") is None:
+                        continue
 
-    history["last_updated"] = datetime.utcnow().isoformat() + "Z"
-    atomic_write_json(VERSIONED_FILE, history)
-    atomic_write_json(LATEST_FILE, history)
+                    existing[(td, t)] = r2
 
-    print(f"[ok] Saved snapshot: {VERSIONED_FILE}")
-    print(f"[ok] Updated latest: {LATEST_FILE}")
-    print("DONE.")
+                # 1) live forecast (next business day)
+                pred = predict_next_trading_day(pipeline, full_df)
+                if is_weekend_datestr(pred["target_date"]):
+                    # should not happen, but guard
+                    pred["target_date"] = to_datestr(pd.to_datetime(pred["target_date"]) + BDay(1))
+
+                actual_row = full_df[pd.to_datetime(full_df[DATE_COL]).dt.normalize() == pd.to_datetime(pred["target_date"])]
+                actual_val = float(actual_row.iloc[0][TARGET_COL]) if not actual_row.empty else None
+
+                live_rec = {
+                    "target_date": pred["target_date"],
+                    "forecast_value": pred["forecast_value"],
+                    "confidence_low": pred["confidence_low"],
+                    "confidence_high": pred["confidence_high"],
+                    "actual_value": actual_val,
+                    "last_known_date": pred["last_known_date"],
+                    "last_known_vol": pred["last_known_vol"],
+                    "generated_at": now_utc,
+                    "type": "forecast_next_day",
+                }
+                existing[(live_rec["target_date"], "forecast_next_day")] = live_rec
+
+                # 2) backtests (last 5)
+                for back in range(1, DAYS_BACK + 1):
+                    df_slice = full_df.iloc[:-back].copy()
+                    if len(df_slice) < 80:
+                        continue
+
+                    bt = predict_next_trading_day(pipeline, df_slice)
+                    if is_weekend_datestr(bt["target_date"]):
+                        continue
+
+                    actual_row = full_df[pd.to_datetime(full_df[DATE_COL]).dt.normalize() == pd.to_datetime(bt["target_date"])]
+                    actual_val = float(actual_row.iloc[0][TARGET_COL]) if not actual_row.empty else None
+                    if actual_val is None:
+                        continue
+
+                    bt_rec = {
+                        "target_date": bt["target_date"],
+                        "forecast_value": bt["forecast_value"],
+                        "confidence_low": bt["confidence_low"],
+                        "confidence_high": bt["confidence_high"],
+                        "actual_value": actual_val,
+                        "last_known_date": bt["last_known_date"],
+                        "last_known_vol": bt["last_known_vol"],
+                        "generated_at": now_utc,
+                        "type": "backtest_next_day",
+                    }
+                    existing[(bt_rec["target_date"], "backtest_next_day")] = bt_rec
+
+                # cleanup + sort
+                cleaned = []
+                for r in existing.values():
+                    if r.get("type") == "forecast_next_day" and is_weekend_datestr(r.get("target_date", "")):
+                        continue
+                    cleaned.append(r)
+
+                history["data"][symbol] = sorted(cleaned, key=lambda x: (x.get("target_date", ""), x.get("type", "")))
+
+            except Exception as e:
+                print(f"⚠️ Skipping {symbol}: {e}")
+
+        # snapshot + latest
+        today = datetime.now().strftime("%Y-%m-%d")
+        snapshot_file = os.path.join(SNAPSHOT_DIR, f"forecast_history_{today}.json")
+        atomic_write_json(snapshot_file, history)
+        atomic_write_json(LATEST_FILE, history)
+
+        print(f"\n📸 Snapshot written: {snapshot_file}")
+        print(f"✅ Latest updated:   {LATEST_FILE}")
+
+    finally:
+        release_lock(LOCK_FILE)
 
 
 if __name__ == "__main__":
