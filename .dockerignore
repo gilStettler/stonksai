@@ -1,0 +1,12 @@
+**/__pycache__/
+**/*.pyc
+**/.DS_Store
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+venv/
+.env
+jobs/data_out/
+jobs/data_csv/
+frontend/.streamlit/secrets.toml
+.cache/

@@ -2,6 +2,17 @@
 
 This project implements an automated pipeline to forecast the Daily Volatility (EWMA) of SMI (Swiss Market Index) stocks using the **Amazon Chronos-2** foundation model.
 
+## Frontend
+
+- open Terminal
+- cd frontend
+- streamlit run app.py
+
+## Backend
+- open another Terminal
+- cd backend
+- python -m uvicorn api.main:app --reload --port 8000
+
 ## 🚀 Key Features
 
 *   **Next-Day Forecast:** Predicts volatility for the next trading day.

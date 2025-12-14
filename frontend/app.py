@@ -1,110 +1,138 @@
+from __future__ import annotations
+
 import os
-import requests
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
-import streamlit as st
 import plotly.graph_objects as go
-from datetime import timedelta
+import requests
+import streamlit as st
+
+# ------------------------------------------------------------------------------
+# Page
+# ------------------------------------------------------------------------------
+st.set_page_config(page_title="StonksAI – Volatility", layout="wide")
+
+PLOTLY_CONFIG = {"displayModeBar": False}
 
 
-# -----------------------------
-# Page setup + compact typography
-# -----------------------------
-st.set_page_config(page_title="VolaTrade Insights", layout="wide")
-
-st.markdown(
-    """
-    <style>
-      h1 { font-size: 1.6rem; margin-bottom: 0.2rem; }
-      h2 { font-size: 1.25rem; margin-top: 0.6rem; }
-      h3 { font-size: 1.05rem; margin-top: 0.6rem; }
-      .small { font-size: 0.9rem; opacity: 0.85; }
-      div[data-testid="stMetricValue"] { font-size: 1.2rem; }
-      div[data-testid="stMetricLabel"] { font-size: 0.9rem; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-PLOTLY_CONFIG = {"displayModeBar": False, "responsive": True}
-
-st.title("VolaTrade Insights")
-st.caption("Next-day volatility forecast · realized range · confidence band · risk label")
+# ------------------------------------------------------------------------------
+# Config (secrets first, then env, then default)
+# ------------------------------------------------------------------------------
+def _secret_get(key: str, default: Any = None) -> Any:
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
 
 
-# -----------------------------
-# Config (secrets.toml OR env)
-# -----------------------------
-API_URL = st.secrets.get("API_URL", os.getenv("API_URL", "http://127.0.0.1:8000"))
-API_KEY = st.secrets.get("API_KEY", os.getenv("API_KEY", ""))
+API_BASE = (
+    _secret_get("API_BASE")
+    or os.getenv("API_BASE")
+    or os.getenv("API_URL")
+    or "http://127.0.0.1:8000"
+).rstrip("/")
 
-if not API_KEY:
-    st.warning(
-        "API_KEY missing.\n\n"
-        "Create frontend/.streamlit/secrets.toml:\n\n"
-        "API_URL='http://127.0.0.1:8000'\n"
-        "API_KEY='vt_live_free_abc'"
+API_KEY = (
+    _secret_get("VT_API_KEY")
+    or _secret_get("API_KEY")
+    or os.getenv("VT_API_KEY")
+    or os.getenv("API_KEY")
+    or ""
+).strip()
+
+# ------------------------------------------------------------------------------
+# HTTP helpers
+# ------------------------------------------------------------------------------
+def _headers() -> Dict[str, str]:
+    if not API_KEY:
+        return {}
+    return {"Authorization": f"Bearer {API_KEY}"}
+
+
+def _show_auth_error(status_code: int, body: str):
+    st.error(
+        f"🔒 Backend Auth fehlgeschlagen ({status_code}).\n\n"
+        f"**API_BASE:** `{API_BASE}`  \n"
+        f"**API_KEY geladen:** `{bool(API_KEY)}`\n\n"
+        "Fix-Checklist:\n"
+        "- `frontend/.streamlit/secrets.toml` enthält `VT_API_KEY`\n"
+        "- Backend ENV `VT_API_KEYS` enthält genau diesen Key\n"
+        "- Backend läuft wirklich auf API_BASE\n"
+    )
+    if body:
+        st.code(body[:2000])
+    st.stop()
+
+
+def _show_backend_down(err: Exception):
+    st.error(
+        "🚫 Backend nicht erreichbar.\n\n"
+        f"**API_BASE:** `{API_BASE}`\n\n"
+        "Typische Ursachen:\n"
+        "- Backend läuft nicht\n"
+        "- falscher Host/Port\n"
+        "- in Docker müsste API_BASE z.B. `http://backend:8000` sein\n\n"
+        f"Fehler: `{type(err).__name__}: {err}`"
     )
     st.stop()
 
 
-# -----------------------------
-# API helpers (SUSTAINABLE CACHE)
-# -----------------------------
-def _headers(api_key: str):
-    return {"Authorization": f"Bearer {api_key}"}
-
-
-@st.cache_data(ttl=30)
-def api_get_cached(api_url: str, api_key: str, path: str, params_items: tuple) -> dict:
-    params = dict(params_items)
-    r = requests.get(
-        f"{api_url}{path}",
-        params=params,
-        headers=_headers(api_key),
-        timeout=30,
-    )
-    if r.status_code >= 400:
-        raise RuntimeError(f"API error {r.status_code}: {r.text}")
-    return r.json()
-
-
-def api_get(path: str, params: dict | None = None) -> dict:
-    if params is None:
-        params = {}
-    params_items = tuple(sorted(params.items()))
-    return api_get_cached(API_URL, API_KEY, path, params_items)
-
-
-def api_post(path: str) -> dict:
-    r = requests.post(
-        f"{API_URL}{path}",
-        headers=_headers(API_KEY),
-        timeout=180,
-    )
-    if r.status_code >= 400:
-        raise RuntimeError(f"API error {r.status_code}: {r.text}")
-    return r.json()
-
-
-# -----------------------------
-# Helpers
-# -----------------------------
-def safe_progress_value(pos):
-    """st.progress accepts only [0..1]. Clamp + neutral fallback."""
+@st.cache_data(ttl=30, show_spinner=False)
+def api_get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    url = f"{API_BASE}{path}"
     try:
-        if pos is None:
-            return 0.5
-        v = float(pos)
-        if v != v:  # NaN
-            return 0.5
-        return max(0.0, min(1.0, v))
+        r = requests.get(url, params=params or {}, headers=_headers(), timeout=30)
+    except requests.exceptions.RequestException as e:
+        _show_backend_down(e)
+
+    if r.status_code in (401, 403):
+        _show_auth_error(r.status_code, r.text)
+
+    r.raise_for_status()
+    return r.json()
+
+
+def api_post(path: str) -> Dict[str, Any]:
+    url = f"{API_BASE}{path}"
+    try:
+        r = requests.post(url, headers=_headers(), timeout=300)
+    except requests.exceptions.RequestException as e:
+        _show_backend_down(e)
+
+    if r.status_code in (401, 403):
+        _show_auth_error(r.status_code, r.text)
+
+    r.raise_for_status()
+    return r.json()
+
+
+# ------------------------------------------------------------------------------
+# Formatting helpers
+# ------------------------------------------------------------------------------
+def fmt_float(x: Any, nd: int = 4) -> str:
+    if x is None:
+        return "—"
+    try:
+        xf = float(x)
+        if pd.isna(xf):
+            return "—"
+        return f"{xf:.{nd}f}"
     except Exception:
-        return 0.5
+        return "—"
 
 
-def _as_iso_list(dt_series):
-    # Plotly is much more stable with ISO strings than pandas Timestamp objects
-    return [pd.to_datetime(x).strftime("%Y-%m-%d") for x in dt_series]
+def fmt_pct(x: Any, nd: int = 1, arrow: Optional[str] = None) -> str:
+    if x is None:
+        return "—"
+    try:
+        xf = float(x)
+        if pd.isna(xf):
+            return "—"
+        a = arrow or ""
+        return f"{a} {xf:+.{nd}f}%"
+    except Exception:
+        return "—"
 
 
 def risk_badge(label: str) -> str:
@@ -112,236 +140,221 @@ def risk_badge(label: str) -> str:
         return "🔴 High"
     if label == "Low":
         return "🟢 Low"
-    return "🟡 Medium"
+    return "🟠 Medium"
 
 
-def delta_badge(delta, arrow):
-    if delta is None or arrow is None:
-        return "n/a"
+def delta_percent(delta_abs: Any, base: Any) -> Optional[float]:
+    if delta_abs is None or base is None:
+        return None
     try:
-        return f"{arrow} {float(delta):.4f}"
+        d = float(delta_abs)
+        b = float(base)
+        if b == 0 or pd.isna(d) or pd.isna(b):
+            return None
+        return (d / b) * 100.0
     except Exception:
-        return "n/a"
-
-
-def sanitize_history_df(rows):
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return df
-    df["target_date"] = pd.to_datetime(df.get("target_date"), errors="coerce")
-    for c in ["forecast_value", "confidence_low", "confidence_high", "actual_value"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-    df = df.dropna(subset=["target_date", "forecast_value"]).sort_values("target_date")
-    return df
-
-
-def points_to_realized_df(points):
-    """Convert backend range_5d.points into a DF with date + realized."""
-    if not points:
-        return pd.DataFrame(columns=["date", "realized"])
-    df = pd.DataFrame(points).copy()
-    if df.empty:
-        return pd.DataFrame(columns=["date", "realized"])
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df["realized"] = pd.to_numeric(df["realized"], errors="coerce")
-    df = df.dropna(subset=["date", "realized"]).sort_values("date")
-    return df
-
-
-# -----------------------------
-# Plot builders
-# -----------------------------
-def build_5d_window_figure(points, symbol: str, forecast_value: float | None):
-    """
-    points: list of {date, realized} from backend (CSV-based).
-    Shows:
-      - green band between min/max
-      - realized line
-      - forecast marker at T+1
-    """
-    df = points_to_realized_df(points)
-    if df.empty or len(df) < 2:
         return None
 
-    x_dates = _as_iso_list(df["date"])
-    x_rev = list(reversed(x_dates))
-    y_real = df["realized"].astype(float).tolist()
 
-    rmin, rmax = float(df["realized"].min()), float(df["realized"].max())
+# ------------------------------------------------------------------------------
+# DataFrame helpers
+# ------------------------------------------------------------------------------
+def sanitize_records_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows).copy()
+    if "target_date" in df.columns:
+        df["target_date"] = pd.to_datetime(df["target_date"], errors="coerce").dt.date.astype(str)
+    for c in ["forecast_value", "confidence_low", "confidence_high", "actual_value", "last_known_vol"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
 
+
+def filter_trading_days(df: pd.DataFrame, date_col: str = "target_date") -> pd.DataFrame:
+    if df.empty or date_col not in df.columns:
+        return df
+    dt = pd.to_datetime(df[date_col], errors="coerce")
+    wd = dt.dt.weekday
+    return df.loc[wd < 5].copy()
+
+
+# ------------------------------------------------------------------------------
+# Plot builder
+# ------------------------------------------------------------------------------
+def build_prediction_vs_actual_figure(
+    df_bt: pd.DataFrame,
+    symbol: str,
+    live_pred: Optional[Dict[str, Any]] = None,
+) -> go.Figure:
     fig = go.Figure()
 
-    fig.add_trace(go.Scatter(
-        x=x_dates + x_rev,
-        y=[rmax]*len(x_dates) + [rmin]*len(x_dates),
-        fill="toself",
-        fillcolor="rgba(40, 167, 69, 0.15)",
-        line=dict(width=0),
-        name="5D Range",
-        hoverinfo="skip",
-    ))
+    df_bt = filter_trading_days(df_bt)
 
-    fig.add_trace(go.Scatter(
-        x=x_dates,
-        y=y_real,
-        mode="lines+markers",
-        name="Realized (EWMA)",
-        hovertemplate="Realized: %{y:.4f}<br>%{x}<extra></extra>",
-    ))
+    # live pred weekday check
+    if live_pred:
+        try:
+            live_dt = pd.to_datetime(live_pred.get("target_date"), errors="coerce")
+            if live_dt is pd.NaT or live_dt.weekday() >= 5:
+                live_pred = None
+        except Exception:
+            live_pred = None
 
-    if forecast_value is not None:
-        t1_iso = (pd.to_datetime(df["date"].iloc[-1]) + timedelta(days=1)).strftime("%Y-%m-%d")
-        fig.add_trace(go.Scatter(
-            x=[t1_iso],
-            y=[float(forecast_value)],
-            mode="markers",
-            marker=dict(size=12, symbol="diamond"),
-            name="Forecast (T+1)",
-            hovertemplate="Forecast: %{y:.4f}<br>%{x}<extra></extra>",
-        ))
+    if df_bt.empty and not live_pred:
+        fig.update_layout(
+            height=360,
+            margin=dict(l=40, r=20, t=40, b=30),
+            title=dict(text=f"{symbol} – Prediction vs Actual (no data)", font=dict(size=14), x=0.01),
+        )
+        return fig
 
-    fig.update_layout(
-        height=240,
-        margin=dict(l=40, r=20, t=35, b=25),
-        title=dict(text=f"{symbol} – 5-Day Realized Range + Forecast", font=dict(size=13), x=0.01),
-        font=dict(size=11),
-        legend=dict(orientation="h", y=1.05, x=1, xanchor="right"),
-    )
-    fig.update_yaxes(title_text="Volatility", tickfont=dict(size=10))
-    fig.update_xaxes(title_text="Date", tickfont=dict(size=10))
-    return fig
+    if not df_bt.empty:
+        df_bt = df_bt.sort_values("target_date").reset_index(drop=True)
+        x = df_bt["target_date"].tolist()
 
+        # Confidence band if available
+        ok_band = df_bt.get("confidence_low").notna() & df_bt.get("confidence_high").notna()
+        if ok_band.any():
+            x_ok = df_bt.loc[ok_band, "target_date"].tolist()
+            y_low = df_bt.loc[ok_band, "confidence_low"].tolist()
+            y_high = df_bt.loc[ok_band, "confidence_high"].tolist()
+            if len(x_ok) >= 2:
+                fig.add_trace(go.Scatter(x=x_ok, y=y_high, line=dict(width=0), showlegend=False, hoverinfo="skip"))
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_ok,
+                        y=y_low,
+                        fill="tonexty",
+                        line=dict(width=0),
+                        name="Confidence Band",
+                        hoverinfo="skip",
+                    )
+                )
 
-def build_history_with_realized_figure(df_forecast: pd.DataFrame, realized_points, symbol: str):
-    """
-    Forecast history (JSON) + last 5 realized volatility points (CSV)
-    and show forecast vs realized in the SAME chart.
+        # Prediction line
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=df_bt["forecast_value"].tolist(),
+                mode="lines+markers",
+                name="Prediction (T+1)",
+                hovertemplate="Prediction: %{y:.4f}<br>%{x}<extra></extra>",
+            )
+        )
 
-    - Forecast: line + markers
-    - Confidence band: fill between low/high (if available)
-    - Realized: last 5 realized points (EWMA) as line + markers
-    """
-    fig = go.Figure()
+        # Actual line if available
+        if "actual_value" in df_bt.columns and df_bt["actual_value"].notna().any():
+            ok = df_bt["actual_value"].notna()
+            x_a = df_bt.loc[ok, "target_date"].tolist()
+            y_a = df_bt.loc[ok, "actual_value"].tolist()
+            mode = "lines+markers" if len(x_a) >= 2 else "markers"
+            fig.add_trace(
+                go.Scatter(
+                    x=x_a,
+                    y=y_a,
+                    mode=mode,
+                    marker=dict(size=8),
+                    name="Actual Volatility",
+                    hovertemplate="Actual: %{y:.4f}<br>%{x}<extra></extra>",
+                )
+            )
 
-    # --- Realized series (last 5 points)
-    df_r = points_to_realized_df(realized_points)
-    if not df_r.empty:
-        x_r = _as_iso_list(df_r["date"])
-        y_r = df_r["realized"].astype(float).tolist()
-        fig.add_trace(go.Scatter(
-            x=x_r,
-            y=y_r,
-            mode="lines+markers",
-            name="Realized (EWMA, last 5D)",
-            hovertemplate="Realized: %{y:.4f}<br>%{x}<extra></extra>",
-        ))
+    # Live pred marker
+    if live_pred:
+        live_date = str(pd.to_datetime(live_pred.get("target_date")).date())
+        live_val = live_pred.get("forecast_value", None)
 
-    # --- Forecast series (history)
-    x_f = _as_iso_list(df_forecast["target_date"])
-    y_f = df_forecast["forecast_value"].astype(float).tolist()
-
-    # Confidence band
-    if {"confidence_low", "confidence_high"}.issubset(df_forecast.columns):
-        ok = df_forecast["confidence_low"].notna() & df_forecast["confidence_high"].notna()
-        ok_list = ok.tolist()
-
-        x_ok = [x_f[i] for i, v in enumerate(ok_list) if v]
-        y_low = df_forecast.loc[ok, "confidence_low"].astype(float).tolist()
-        y_high = df_forecast.loc[ok, "confidence_high"].astype(float).tolist()
-
-        if len(x_ok) == len(y_low) == len(y_high) and len(x_ok) > 1:
-            fig.add_trace(go.Scatter(
-                x=x_ok,
-                y=y_high,
-                line=dict(width=0),
-                showlegend=False,
-                hoverinfo="skip",
-            ))
-            fig.add_trace(go.Scatter(
-                x=x_ok,
-                y=y_low,
-                fill="tonexty",
-                fillcolor="rgba(99,110,250,0.15)",
-                line=dict(width=0),
-                name="Confidence Band",
-                hoverinfo="skip",
-            ))
-
-    fig.add_trace(go.Scatter(
-        x=x_f,
-        y=y_f,
-        mode="lines+markers",
-        name="Forecast (history)",
-        hovertemplate="Forecast: %{y:.4f}<br>%{x}<extra></extra>",
-    ))
-
-    # Optional: actual_value (if present in JSON)
-    if "actual_value" in df_forecast.columns and df_forecast["actual_value"].notna().any():
-        ok2 = df_forecast["actual_value"].notna()
-        x_a = [x_f[i] for i, v in enumerate(ok2.tolist()) if v]
-        y_a = df_forecast.loc[ok2, "actual_value"].astype(float).tolist()
-        fig.add_trace(go.Scatter(
-            x=x_a,
-            y=y_a,
-            mode="markers",
-            marker=dict(size=7, symbol="circle"),
-            name="Actual (from JSON, if available)",
-            hovertemplate="Actual: %{y:.4f}<br>%{x}<extra></extra>",
-        ))
+        if df_bt.empty or (live_date not in set(df_bt["target_date"].tolist())):
+            fig.add_trace(
+                go.Scatter(
+                    x=[live_date],
+                    y=[live_val],
+                    mode="markers",
+                    marker=dict(size=12, symbol="diamond"),
+                    name="Live Prediction",
+                    hovertemplate="Live Prediction: %{y:.4f}<br>%{x}<extra></extra>",
+                )
+            )
 
     fig.update_layout(
         height=360,
         margin=dict(l=40, r=20, t=40, b=30),
-        title=dict(text=f"{symbol} – Forecast History vs Realized (last 5 days)", font=dict(size=14), x=0.01),
-        font=dict(size=11),
-        legend=dict(orientation="h", y=1.08, x=1, xanchor="right"),
+        title=dict(
+            text=f"{symbol} – Prediction (T+1) vs Actual (last 5 trading days) + Live",
+            font=dict(size=14),
+            x=0.01,
+        ),
+        legend=dict(orientation="h", y=1.10, x=1, xanchor="right"),
     )
-    fig.update_yaxes(title_text="Volatility", tickfont=dict(size=10))
-    fig.update_xaxes(title_text="Date", tickfont=dict(size=10))
+    fig.update_yaxes(title_text="Volatility")
+    fig.update_xaxes(title_text="Date", rangebreaks=[dict(bounds=["sat", "mon"])])
     return fig
 
 
-# -----------------------------
-# Nonce state (forces re-fetch & re-render)
-# -----------------------------
+# ------------------------------------------------------------------------------
+# Session init
+# ------------------------------------------------------------------------------
 if "nonce" not in st.session_state:
     st.session_state["nonce"] = 0
 
-
-# -----------------------------
-# Sidebar (admin)
-# -----------------------------
+# ------------------------------------------------------------------------------
+# Sidebar
+# ------------------------------------------------------------------------------
 with st.sidebar:
-    st.header("Admin")
+    st.header("Config")
+    st.caption(f"API_BASE: {API_BASE}")
+    st.caption(f"API_KEY loaded: {'yes' if bool(API_KEY) else 'no'}")
+
+    st.divider()
+    st.header("Actions")
+
+    colA, colB = st.columns(2)
+    with colA:
+        if st.button("🔄 Refresh"):
+            st.cache_data.clear()
+            st.session_state["nonce"] += 1
+            st.rerun()
+
+    with colB:
+        auto = st.toggle("Auto refresh", value=False, help="Refresh every 60s")
+    if auto:
+        # Soft auto-refresh
+        st.write("")  # spacer
+        st.caption("Auto refresh active (60s)")
+        st.autorefresh(interval=60_000, key="auto_refresh")
+
+    st.divider()
+    st.header("Admin (optional)")
+    st.caption("Nur wenn dein API Key im Backend als `:admin` gesetzt ist.")
 
     if st.button("Run Ingest"):
-        try:
-            res = api_post("/v1/admin/jobs/ingest")
-            st.success(f"Return code: {res.get('returncode')}")
-            st.code((res.get("stdout") or "")[-4000:] + "\n" + (res.get("stderr") or "")[-2000:])
-            st.cache_data.clear()
-            st.session_state["nonce"] += 1
-        except Exception as e:
-            st.error(str(e))
+        res = api_post("/v1/admin/jobs/ingest")
+        st.success(f"Return code: {res.get('returncode')}")
+        st.code((res.get("stdout") or "")[-4000:] + "\n" + (res.get("stderr") or "")[-2000:])
+        st.cache_data.clear()
+        st.session_state["nonce"] += 1
+        st.rerun()
 
     if st.button("Run Forecast"):
-        try:
-            res = api_post("/v1/admin/jobs/forecast")
-            st.success(f"Return code: {res.get('returncode')}")
-            st.code((res.get("stdout") or "")[-4000:] + "\n" + (res.get("stderr") or "")[-2000:])
-            st.cache_data.clear()
-            st.session_state["nonce"] += 1
-        except Exception as e:
-            st.error(str(e))
+        res = api_post("/v1/admin/jobs/forecast")
+        st.success(f"Return code: {res.get('returncode')}")
+        st.code((res.get("stdout") or "")[-4000:] + "\n" + (res.get("stderr") or "")[-2000:])
+        st.cache_data.clear()
+        st.session_state["nonce"] += 1
+        st.rerun()
 
 
-# -----------------------------
-# Load symbols
-# -----------------------------
+# ------------------------------------------------------------------------------
+# Main
+# ------------------------------------------------------------------------------
+st.title("StonksAI – Volatility Forecast")
+
+# Fetch list of stocks
 stocks = api_get("/v1/stocks", {"_nonce": st.session_state["nonce"]})
-symbols = stocks.get("symbols", [])
+symbols: List[str] = stocks.get("symbols", []) or []
 last_updated = stocks.get("last_updated")
+
+st.caption(f"Last updated: {last_updated}")
 
 if not symbols:
     st.info("No symbols available yet. Run ingest + forecast jobs first.")
@@ -350,95 +363,70 @@ if not symbols:
 tab1, tab2 = st.tabs(["📈 Dashboard", "🏁 Overview"])
 
 
-# =============================
-# Dashboard
-# =============================
+# ------------------------------------------------------------------------------
+# Dashboard tab
+# ------------------------------------------------------------------------------
 with tab1:
     symbol = st.selectbox("Stock", symbols, key="symbol_select")
 
-    prev = st.session_state.get("_prev_symbol")
-    if prev and prev != symbol:
+    # Ensure plot refresh on symbol change
+    prev_symbol = st.session_state.get("_prev_symbol")
+    if prev_symbol and prev_symbol != symbol:
         st.cache_data.clear()
         st.session_state["nonce"] += 1
     st.session_state["_prev_symbol"] = symbol
 
-    st.caption(f"Last updated: {last_updated}")
+    payload = api_get("/v1/forecast/latest", {"symbol": symbol, "_nonce": st.session_state["nonce"]})
+    record = payload.get("record", {}) or {}
+    derived = payload.get("derived", {}) or {}
 
-    # --- Latest (nonce included so cache never “sticks” across symbol switches)
-    latest = api_get("/v1/forecast/latest", {"symbol": symbol, "_nonce": st.session_state["nonce"]})
-    record = latest.get("record", {}) or {}
-    derived = latest.get("derived", {}) or {}
+    # Core metrics
+    pred_val = record.get("forecast_value")
+    last_vol = record.get("last_known_vol")
+    last_date = record.get("last_known_date")
+    tgt_date = record.get("target_date")
 
-    # Metrics
+    risk_label = (derived.get("risk", {}) or {}).get("label", "Medium")
+    delta_abs = derived.get("delta_vol")
+    delta_arrow = derived.get("delta_arrow")
+
+    band = (derived.get("confidence_band") or {})
+    band_low = band.get("low")
+    band_high = band.get("high")
+
+    dpct = delta_percent(delta_abs, last_vol)
+
     c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Target date", tgt_date or "—")
+    c2.metric("Prediction (T+1)", fmt_float(pred_val, 6))
+    c3.metric("Risk", risk_badge(risk_label))
+    c4.metric("Δ vs last realized", fmt_pct(dpct, 1, delta_arrow))
 
-    c1.metric("Δ Volatility", delta_badge(derived.get("delta_vol"), derived.get("delta_arrow")))
+    st.write(
+        f"**Confidence band:** {fmt_float(band_low, 6)} – {fmt_float(band_high, 6)}  \n"
+        f"**Last known date:** {last_date or '—'} | **Last known EWMA vol:** {fmt_float(last_vol, 6)}"
+    )
 
-    band = derived.get("confidence_band", {}) or {}
-    try:
-        c2.metric("Confidence Band", f"{float(band.get('low')):.4f} – {float(band.get('high')):.4f}")
-    except Exception:
-        c2.metric("Confidence Band", "n/a")
+    # Backtests (last 5 trading days)
+    st.subheader("Prediction vs Actual (last 5 trading days) + Live Prediction")
+    bt_payload = api_get(
+        "/v1/forecast/backtests",
+        {"symbol": symbol, "days": 5, "_nonce": st.session_state["nonce"]},
+    )
+    df_bt = sanitize_records_df(bt_payload.get("records", []))
 
-    r5 = derived.get("range_5d", {}) or {}
-    n = r5.get("n", 0)
-    rng_label = f"Range (n={n})" if n else "Range"
-    try:
-        c3.metric(rng_label, f"{float(r5.get('min')):.4f} – {float(r5.get('max')):.4f}")
-    except Exception:
-        c3.metric(rng_label, "n/a")
+    fig = build_prediction_vs_actual_figure(df_bt, symbol, live_pred=record if record else None)
 
-    risk = (derived.get("risk", {}) or {}).get("label", "Medium")
-    c4.metric("Risk", risk_badge(risk))
-
-    pos = r5.get("pos", None)
-    st.caption("Forecast position within realized range (0 = low end, 1 = high end)")
-    st.progress(safe_progress_value(pos))
-
-    # 5D chart
-    st.subheader("5-Day Realized Range (from CSV) + Forecast (T+1)")
-    points = r5.get("points", []) or []
-    try:
-        fval = float(record.get("forecast_value"))
-    except Exception:
-        fval = None
-
-    plot5_slot = st.empty()
-    fig5 = build_5d_window_figure(points, symbol, fval)
-
-    target_date = (record or {}).get("target_date", "na")
-    plot5_key = f"plot5::{symbol}::{target_date}::{hash(str(points))}::{st.session_state['nonce']}"
-
-    if fig5:
-        plot5_slot.plotly_chart(fig5, use_container_width=True, config=PLOTLY_CONFIG, key=plot5_key)
-    else:
-        plot5_slot.info("Not enough realized CSV data to render 5-day chart yet.")
-
-    # Forecast history + realized
-    st.subheader("Forecast History + Realized (last 5 days)")
-    hist_payload = api_get("/v1/forecast/history", {"symbol": symbol, "_nonce": st.session_state["nonce"]})
-    hist_rows = hist_payload.get("records", [])
-    df_hist = sanitize_history_df(hist_rows)
-
-    hist_slot = st.empty()
-    if not df_hist.empty:
-        # Keep history readable: last 30 points (adjust as you like)
-        df_hist_tail = df_hist.tail(30).copy()
-
-        fig_hist = build_history_with_realized_figure(df_hist_tail, points, symbol)
-
-        # make key depend on symbol + content + nonce (forces remount)
-        hist_key = f"hist::{symbol}::{hash(df_hist_tail.to_csv(index=False))}::{hash(str(points))}::{st.session_state['nonce']}"
-        hist_slot.plotly_chart(fig_hist, use_container_width=True, config=PLOTLY_CONFIG, key=hist_key)
-    else:
-        hist_slot.info("No forecast history available yet.")
+    # Stable & unique key to force proper re-render
+    plot_key = f"pred_actual::{symbol}::{st.session_state['nonce']}::{len(df_bt)}"
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=plot_key)
 
 
-# =============================
-# Overview
-# =============================
+# ------------------------------------------------------------------------------
+# Overview tab
+# ------------------------------------------------------------------------------
 with tab2:
-    st.caption(f"Last updated: {last_updated}")
+    st.subheader("All symbols overview")
 
     rows = []
     for s in symbols:
@@ -447,13 +435,20 @@ with tab2:
             d = p.get("derived", {}) or {}
             r = p.get("record", {}) or {}
 
-            rows.append({
-                "symbol": s,
-                "risk": risk_badge((d.get("risk", {}) or {}).get("label", "Medium")),
-                "delta": delta_badge(d.get("delta_vol"), d.get("delta_arrow")),
-                "forecast": r.get("forecast_value", None),
-            })
+            dp = delta_percent(d.get("delta_vol"), r.get("last_known_vol"))
+            rows.append(
+                {
+                    "symbol": s,
+                    "risk": risk_badge((d.get("risk", {}) or {}).get("label", "Medium")),
+                    "Δ%": fmt_pct(dp, 1, d.get("delta_arrow")),
+                    "prediction": r.get("forecast_value"),
+                    "target_date": r.get("target_date"),
+                    "last_vol": r.get("last_known_vol"),
+                }
+            )
         except Exception:
-            pass
+            # don’t kill the overview if one symbol fails
+            continue
 
-    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True)

@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persistiert Daten & Locks lokal
+      - ./jobs/data_out:/app/jobs/data_out
+      - ./jobs/data_csv:/app/jobs/data_csv
+      - ./.locks:/app/.locks
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      # Streamlit soll im Container NICHT auf localhost, sondern auf service-name "backend" zugreifen
+      API_BASE: "http://backend:8000"
+      # API Key: entweder als ENV oder via secrets.toml (beides geht)
+      VT_API_KEY: "vt_live_admin_123"
+    depends_on:
+      - backend
+    restart: unless-stopped
