@@ -12,13 +12,13 @@ import streamlit as st
 # Page
 # ------------------------------------------------------------------------------
 st.set_page_config(page_title="StonksAI – Volatility", layout="wide")
-
 PLOTLY_CONFIG = {"displayModeBar": False}
-
 
 # ------------------------------------------------------------------------------
 # Config (secrets first, then env, then default)
 # ------------------------------------------------------------------------------
+
+
 def _secret_get(key: str, default: Any = None) -> Any:
     try:
         return st.secrets.get(key, default)
@@ -26,13 +26,22 @@ def _secret_get(key: str, default: Any = None) -> Any:
         return default
 
 
+# Prefer docker-safe env var first:
+# - Docker Compose: API_BASE_URL=http://backend:8000
+# - Local (no docker): API_BASE_URL=http://127.0.0.1:8000
 API_BASE = (
-    _secret_get("API_BASE")
+    _secret_get("API_BASE_URL")
+    or _secret_get("API_BASE")
+    or _secret_get("API_URL")
+    or os.getenv("API_BASE_URL")
     or os.getenv("API_BASE")
     or os.getenv("API_URL")
     or "http://127.0.0.1:8000"
 ).rstrip("/")
 
+# Token naming:
+# - VT_API_KEY in .env / docker compose
+# - alternatively API_KEY
 API_KEY = (
     _secret_get("VT_API_KEY")
     or _secret_get("API_KEY")
@@ -44,6 +53,8 @@ API_KEY = (
 # ------------------------------------------------------------------------------
 # HTTP helpers
 # ------------------------------------------------------------------------------
+
+
 def _headers() -> Dict[str, str]:
     if not API_KEY:
         return {}
@@ -56,9 +67,9 @@ def _show_auth_error(status_code: int, body: str):
         f"**API_BASE:** `{API_BASE}`  \n"
         f"**API_KEY geladen:** `{bool(API_KEY)}`\n\n"
         "Fix-Checklist:\n"
-        "- `frontend/.streamlit/secrets.toml` enthält `VT_API_KEY`\n"
+        "- Docker: Frontend ENV `VT_API_KEY` ist gesetzt (z.B. `vt_live_admin_123`)\n"
         "- Backend ENV `VT_API_KEYS` enthält genau diesen Key\n"
-        "- Backend läuft wirklich auf API_BASE\n"
+        "- Frontend ruft in Docker `http://backend:8000` auf (nicht `localhost`)\n"
     )
     if body:
         st.code(body[:2000])
@@ -72,7 +83,7 @@ def _show_backend_down(err: Exception):
         "Typische Ursachen:\n"
         "- Backend läuft nicht\n"
         "- falscher Host/Port\n"
-        "- in Docker müsste API_BASE z.B. `http://backend:8000` sein\n\n"
+        "- in Docker muss API_BASE z.B. `http://backend:8000` sein (nicht `localhost`)\n\n"
         f"Fehler: `{type(err).__name__}: {err}`"
     )
     st.stop()
@@ -110,6 +121,8 @@ def api_post(path: str) -> Dict[str, Any]:
 # ------------------------------------------------------------------------------
 # Formatting helpers
 # ------------------------------------------------------------------------------
+
+
 def fmt_float(x: Any, nd: int = 4) -> str:
     if x is None:
         return "—"
@@ -159,6 +172,8 @@ def delta_percent(delta_abs: Any, base: Any) -> Optional[float]:
 # ------------------------------------------------------------------------------
 # DataFrame helpers
 # ------------------------------------------------------------------------------
+
+
 def sanitize_records_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
@@ -182,6 +197,8 @@ def filter_trading_days(df: pd.DataFrame, date_col: str = "target_date") -> pd.D
 # ------------------------------------------------------------------------------
 # Plot builder
 # ------------------------------------------------------------------------------
+
+
 def build_prediction_vs_actual_figure(
     df_bt: pd.DataFrame,
     symbol: str,
@@ -213,34 +230,36 @@ def build_prediction_vs_actual_figure(
         x = df_bt["target_date"].tolist()
 
         # Confidence band if available
-        ok_band = df_bt.get("confidence_low").notna() & df_bt.get("confidence_high").notna()
-        if ok_band.any():
-            x_ok = df_bt.loc[ok_band, "target_date"].tolist()
-            y_low = df_bt.loc[ok_band, "confidence_low"].tolist()
-            y_high = df_bt.loc[ok_band, "confidence_high"].tolist()
-            if len(x_ok) >= 2:
-                fig.add_trace(go.Scatter(x=x_ok, y=y_high, line=dict(width=0), showlegend=False, hoverinfo="skip"))
-                fig.add_trace(
-                    go.Scatter(
-                        x=x_ok,
-                        y=y_low,
-                        fill="tonexty",
-                        line=dict(width=0),
-                        name="Confidence Band",
-                        hoverinfo="skip",
+        if "confidence_low" in df_bt.columns and "confidence_high" in df_bt.columns:
+            ok_band = df_bt["confidence_low"].notna() & df_bt["confidence_high"].notna()
+            if ok_band.any():
+                x_ok = df_bt.loc[ok_band, "target_date"].tolist()
+                y_low = df_bt.loc[ok_band, "confidence_low"].tolist()
+                y_high = df_bt.loc[ok_band, "confidence_high"].tolist()
+                if len(x_ok) >= 2:
+                    fig.add_trace(go.Scatter(x=x_ok, y=y_high, line=dict(width=0), showlegend=False, hoverinfo="skip"))
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_ok,
+                            y=y_low,
+                            fill="tonexty",
+                            line=dict(width=0),
+                            name="Confidence Band",
+                            hoverinfo="skip",
+                        )
                     )
-                )
 
         # Prediction line
-        fig.add_trace(
-            go.Scatter(
-                x=x,
-                y=df_bt["forecast_value"].tolist(),
-                mode="lines+markers",
-                name="Prediction (T+1)",
-                hovertemplate="Prediction: %{y:.4f}<br>%{x}<extra></extra>",
+        if "forecast_value" in df_bt.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=x,
+                    y=df_bt["forecast_value"].tolist(),
+                    mode="lines+markers",
+                    name="Prediction (T+1)",
+                    hovertemplate="Prediction: %{y:.4f}<br>%{x}<extra></extra>",
+                )
             )
-        )
 
         # Actual line if available
         if "actual_value" in df_bt.columns and df_bt["actual_value"].notna().any():
@@ -264,7 +283,7 @@ def build_prediction_vs_actual_figure(
         live_date = str(pd.to_datetime(live_pred.get("target_date")).date())
         live_val = live_pred.get("forecast_value", None)
 
-        if df_bt.empty or (live_date not in set(df_bt["target_date"].tolist())):
+        if df_bt.empty or ("target_date" not in df_bt.columns) or (live_date not in set(df_bt["target_date"].tolist())):
             fig.add_trace(
                 go.Scatter(
                     x=[live_date],
@@ -317,9 +336,8 @@ with st.sidebar:
 
     with colB:
         auto = st.toggle("Auto refresh", value=False, help="Refresh every 60s")
+
     if auto:
-        # Soft auto-refresh
-        st.write("")  # spacer
         st.caption("Auto refresh active (60s)")
         st.autorefresh(interval=60_000, key="auto_refresh")
 
@@ -362,14 +380,13 @@ if not symbols:
 
 tab1, tab2 = st.tabs(["📈 Dashboard", "🏁 Overview"])
 
-
 # ------------------------------------------------------------------------------
 # Dashboard tab
 # ------------------------------------------------------------------------------
 with tab1:
     symbol = st.selectbox("Stock", symbols, key="symbol_select")
 
-    # Ensure plot refresh on symbol change
+    # Force refresh when symbol changes
     prev_symbol = st.session_state.get("_prev_symbol")
     if prev_symbol and prev_symbol != symbol:
         st.cache_data.clear()
@@ -417,10 +434,9 @@ with tab1:
 
     fig = build_prediction_vs_actual_figure(df_bt, symbol, live_pred=record if record else None)
 
-    # Stable & unique key to force proper re-render
+    # Unique key forces Streamlit to re-render correctly
     plot_key = f"pred_actual::{symbol}::{st.session_state['nonce']}::{len(df_bt)}"
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=plot_key)
-
 
 # ------------------------------------------------------------------------------
 # Overview tab
@@ -428,7 +444,7 @@ with tab1:
 with tab2:
     st.subheader("All symbols overview")
 
-    rows = []
+    rows: List[Dict[str, Any]] = []
     for s in symbols:
         try:
             p = api_get("/v1/forecast/latest", {"symbol": s, "_nonce": st.session_state["nonce"]})
@@ -447,7 +463,6 @@ with tab2:
                 }
             )
         except Exception:
-            # don’t kill the overview if one symbol fails
             continue
 
     df = pd.DataFrame(rows)
