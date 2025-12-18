@@ -30,9 +30,6 @@ def _secret_get(key: str, default: Any = None) -> Any:
         return default
 
 
-# Prefer docker-safe env var first:
-# - Docker Compose: API_BASE_URL=http://backend:8000
-# - Local (no docker): API_BASE_URL=http://127.0.0.1:8000
 API_BASE = (
     _secret_get("API_BASE_URL")
     or _secret_get("API_BASE")
@@ -43,9 +40,6 @@ API_BASE = (
     or "http://127.0.0.1:8000"
 ).rstrip("/")
 
-# Token naming:
-# - VT_API_KEY in .env / docker compose
-# - alternatively API_KEY
 API_KEY = (
     _secret_get("VT_API_KEY")
     or _secret_get("API_KEY")
@@ -98,8 +92,6 @@ TT = {
     "last_known": "Last realized volatility used as baseline (e.g., EWMA or last observed realized volatility).",
     "chart": "Backtests show historical next-day predictions vs realized volatility for recent trading days, plus today's live prediction.",
     "overview": "Overview across all symbols: latest prediction, risk label, and delta vs last realized volatility.",
-    "admin_ingest": "Runs the ingestion job to update local market data files (CSV).",
-    "admin_forecast": "Runs the forecasting job to produce forecast_history.json (latest + backtests).",
     "select_stock": "Select a stock to view the detailed forecast, confidence band, and recent backtests.",
 }
 
@@ -118,7 +110,7 @@ def _show_auth_error(status_code: int, body: str):
         f"API_BASE: `{API_BASE}`  \n"
         f"API_KEY geladen: `{bool(API_KEY)}`\n\n"
         "Fix-Checklist:\n"
-        "- Docker: Frontend ENV `VT_API_KEY` ist gesetzt (z.B. `vt_live_admin_123`)\n"
+        "- Docker: Frontend ENV `VT_API_KEY` ist gesetzt\n"
         "- Backend ENV `VT_API_KEYS` enthält genau diesen Key\n"
         "- Docker: API_BASE_URL muss `http://backend:8000` sein (nicht `localhost`)\n"
     )
@@ -155,20 +147,6 @@ def api_get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any
     return r.json()
 
 
-def api_post(path: str) -> Dict[str, Any]:
-    url = f"{API_BASE}{path}"
-    try:
-        r = requests.post(url, headers=_headers(), timeout=300)
-    except requests.exceptions.RequestException as e:
-        _show_backend_down(e)
-
-    if r.status_code in (401, 403):
-        _show_auth_error(r.status_code, r.text)
-
-    r.raise_for_status()
-    return r.json()
-
-
 # ------------------------------------------------------------------------------
 # Formatting helpers
 # ------------------------------------------------------------------------------
@@ -184,21 +162,7 @@ def fmt_float(x: Any, nd: int = 4) -> str:
         return "—"
 
 
-def fmt_percent_from_ratio(x: Any, nd: int = 2) -> str:
-    """Assumes x is a ratio (e.g., 0.0123) and displays it as percent (1.23%)."""
-    if x is None:
-        return "—"
-    try:
-        xf = float(x)
-        if pd.isna(xf):
-            return "—"
-        return f"{xf * 100:.{nd}f}%"
-    except Exception:
-        return "—"
-
-
 def fmt_vol_with_pct(x: Any, nd_value: int = 6, nd_pct: int = 2) -> str:
-    """Example: 0.012345 (1.23%)"""
     if x is None:
         return "—"
     try:
@@ -278,7 +242,6 @@ def build_prediction_vs_actual_figure(
     fig = go.Figure()
     df_bt = filter_trading_days(df_bt)
 
-    # live pred weekday check
     if live_pred:
         try:
             live_dt = pd.to_datetime(live_pred.get("target_date"), errors="coerce")
@@ -299,7 +262,6 @@ def build_prediction_vs_actual_figure(
         df_bt = df_bt.sort_values("target_date").reset_index(drop=True)
         x = df_bt["target_date"].tolist()
 
-        # Confidence band if available
         if "confidence_low" in df_bt.columns and "confidence_high" in df_bt.columns:
             ok_band = df_bt["confidence_low"].notna() & df_bt["confidence_high"].notna()
             if ok_band.any():
@@ -319,7 +281,6 @@ def build_prediction_vs_actual_figure(
                         )
                     )
 
-        # Prediction line
         if "forecast_value" in df_bt.columns:
             fig.add_trace(
                 go.Scatter(
@@ -332,7 +293,6 @@ def build_prediction_vs_actual_figure(
                 )
             )
 
-        # Actual line if available
         if "actual_value" in df_bt.columns and df_bt["actual_value"].notna().any():
             ok = df_bt["actual_value"].notna()
             x_a = df_bt.loc[ok, "target_date"].tolist()
@@ -350,7 +310,6 @@ def build_prediction_vs_actual_figure(
                 )
             )
 
-    # Live pred marker
     if live_pred:
         live_date = str(pd.to_datetime(live_pred.get("target_date")).date())
         live_val = live_pred.get("forecast_value", None)
@@ -411,53 +370,12 @@ if "symbols" not in st.session_state:
 
 
 # ------------------------------------------------------------------------------
-# Sidebar
+# Sidebar (minimal, no actions/admin)
 # ------------------------------------------------------------------------------
 with st.sidebar:
-    st.header("Config")
-    st.caption(f"API_BASE: {API_BASE}")
-    st.caption(f"API_KEY loaded: {'yes' if bool(API_KEY) else 'no'}")
-    st.caption(f"company_map loaded: {len(COMPANY_MAP)}")
-
-    st.divider()
-    st.header("Actions")
-
-    colA, colB = st.columns(2)
-    with colA:
-        if st.button("🔄 Refresh", help="Clears the frontend cache and reloads data from the backend."):
-            st.cache_data.clear()
-            st.session_state["nonce"] += 1
-            init_data()
-            st.rerun()
-
-    with colB:
-        auto = st.toggle("Auto refresh", value=False, help="Automatically refresh the dashboard every 60 seconds.")
-
-    if auto:
-        st.caption("Auto refresh active (60s)")
-        st.autorefresh(interval=60_000, key="auto_refresh")
-
-    st.divider()
-    st.header("Admin (optional)")
-    st.caption("Nur wenn dein API Key im Backend als `:admin` gesetzt ist.")
-
-    if st.button("Run Ingest", help=TT["admin_ingest"]):
-        res = api_post("/v1/admin/jobs/ingest")
-        st.success(f"Return code: {res.get('returncode')}")
-        st.code((res.get("stdout") or "")[-4000:] + "\n" + (res.get("stderr") or "")[-2000:])
-        st.cache_data.clear()
-        st.session_state["nonce"] += 1
-        init_data()
-        st.rerun()
-
-    if st.button("Run Forecast", help=TT["admin_forecast"]):
-        res = api_post("/v1/admin/jobs/forecast")
-        st.success(f"Return code: {res.get('returncode')}")
-        st.code((res.get("stdout") or "")[-4000:] + "\n" + (res.get("stderr") or "")[-2000:])
-        st.cache_data.clear()
-        st.session_state["nonce"] += 1
-        init_data()
-        st.rerun()
+    st.header("StonksAI")
+    st.caption(f"Last updated: {st.session_state.get('last_updated')}")
+    st.caption(f"Company map: {len(COMPANY_MAP)} entries")
 
 
 # ------------------------------------------------------------------------------
@@ -474,9 +392,6 @@ if not symbols:
 
 tab1, tab2 = st.tabs(["📈 Dashboard", "🏁 Overview"])
 
-# ------------------------------------------------------------------------------
-# Dashboard tab
-# ------------------------------------------------------------------------------
 with tab1:
     symbol = st.selectbox(
         "Stock",
@@ -490,7 +405,6 @@ with tab1:
     record = payload.get("record", {}) or {}
     derived = payload.get("derived", {}) or {}
 
-    # Core metrics
     pred_val = record.get("forecast_value")
     last_vol = record.get("last_known_vol")
     last_date = record.get("last_known_date")
@@ -529,9 +443,6 @@ with tab1:
     plot_key = f"pred_actual::{symbol}::{st.session_state['nonce']}::{len(df_bt)}"
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=plot_key)
 
-# ------------------------------------------------------------------------------
-# Overview tab
-# ------------------------------------------------------------------------------
 with tab2:
     st.subheader("All symbols overview")
     st.caption(TT["overview"])
