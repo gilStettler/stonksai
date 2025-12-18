@@ -30,6 +30,9 @@ def _secret_get(key: str, default: Any = None) -> Any:
         return default
 
 
+# Prefer docker-safe env var first:
+# - Docker Compose: API_BASE_URL=http://backend:8000
+# - Local (no docker): API_BASE_URL=http://127.0.0.1:8000
 API_BASE = (
     _secret_get("API_BASE_URL")
     or _secret_get("API_BASE")
@@ -40,6 +43,9 @@ API_BASE = (
     or "http://127.0.0.1:8000"
 ).rstrip("/")
 
+# Token naming:
+# - VT_API_KEY in .env / docker compose
+# - alternatively API_KEY
 API_KEY = (
     _secret_get("VT_API_KEY")
     or _secret_get("API_KEY")
@@ -79,6 +85,23 @@ def symbol_label(symbol: str) -> str:
     c = company_of(symbol)
     return f"{c} ({symbol})" if c else symbol
 
+
+# ------------------------------------------------------------------------------
+# Tooltips (central)
+# ------------------------------------------------------------------------------
+TT = {
+    "target_date": "Trading day for which the volatility forecast applies (T+1).",
+    "prediction": "Forecasted volatility for the next trading day (T+1). Shown as raw value and as percent.",
+    "risk": "Risk classification derived from predicted volatility and recent market dynamics (Low / Medium / High).",
+    "delta": "Relative change between predicted volatility and the last realized volatility (percentage).",
+    "conf_band": "Expected range (lower–upper) around the prediction, reflecting model uncertainty based on recent history.",
+    "last_known": "Last realized volatility used as baseline (e.g., EWMA or last observed realized volatility).",
+    "chart": "Backtests show historical next-day predictions vs realized volatility for recent trading days, plus today's live prediction.",
+    "overview": "Overview across all symbols: latest prediction, risk label, and delta vs last realized volatility.",
+    "admin_ingest": "Runs the ingestion job to update local market data files (CSV).",
+    "admin_forecast": "Runs the forecasting job to produce forecast_history.json (latest + backtests).",
+    "select_stock": "Select a stock to view the detailed forecast, confidence band, and recent backtests.",
+}
 
 # ------------------------------------------------------------------------------
 # HTTP helpers
@@ -161,6 +184,32 @@ def fmt_float(x: Any, nd: int = 4) -> str:
         return "—"
 
 
+def fmt_percent_from_ratio(x: Any, nd: int = 2) -> str:
+    """Assumes x is a ratio (e.g., 0.0123) and displays it as percent (1.23%)."""
+    if x is None:
+        return "—"
+    try:
+        xf = float(x)
+        if pd.isna(xf):
+            return "—"
+        return f"{xf * 100:.{nd}f}%"
+    except Exception:
+        return "—"
+
+
+def fmt_vol_with_pct(x: Any, nd_value: int = 6, nd_pct: int = 2) -> str:
+    """Example: 0.012345 (1.23%)"""
+    if x is None:
+        return "—"
+    try:
+        xf = float(x)
+        if pd.isna(xf):
+            return "—"
+        return f"{xf:.{nd_value}f} ({xf * 100:.{nd_pct}f}%)"
+    except Exception:
+        return "—"
+
+
 def fmt_pct(x: Any, nd: int = 1, arrow: Optional[str] = None) -> str:
     if x is None:
         return "—"
@@ -227,7 +276,6 @@ def build_prediction_vs_actual_figure(
     live_pred: Optional[Dict[str, Any]] = None,
 ) -> go.Figure:
     fig = go.Figure()
-
     df_bt = filter_trading_days(df_bt)
 
     # live pred weekday check
@@ -279,7 +327,8 @@ def build_prediction_vs_actual_figure(
                     y=df_bt["forecast_value"].tolist(),
                     mode="lines+markers",
                     name="Prediction (T+1)",
-                    hovertemplate="Prediction: %{y:.4f}<br>%{x}<extra></extra>",
+                    hovertemplate="Prediction: %{y:.6f} (" + "%{customdata:.2f}%)<br>Date: %{x}<extra></extra>",
+                    customdata=(df_bt["forecast_value"] * 100.0).round(2).tolist(),
                 )
             )
 
@@ -296,7 +345,8 @@ def build_prediction_vs_actual_figure(
                     mode=mode,
                     marker=dict(size=8),
                     name="Actual Volatility",
-                    hovertemplate="Actual: %{y:.4f}<br>%{x}<extra></extra>",
+                    hovertemplate="Actual: %{y:.6f} (" + "%{customdata:.2f}%)<br>Date: %{x}<extra></extra>",
+                    customdata=[(v * 100.0) if v is not None else None for v in y_a],
                 )
             )
 
@@ -306,6 +356,13 @@ def build_prediction_vs_actual_figure(
         live_val = live_pred.get("forecast_value", None)
 
         if df_bt.empty or ("target_date" not in df_bt.columns) or (live_date not in set(df_bt["target_date"].tolist())):
+            live_pct = None
+            try:
+                if live_val is not None:
+                    live_pct = float(live_val) * 100.0
+            except Exception:
+                live_pct = None
+
             fig.add_trace(
                 go.Scatter(
                     x=[live_date],
@@ -313,7 +370,8 @@ def build_prediction_vs_actual_figure(
                     mode="markers",
                     marker=dict(size=12, symbol="diamond"),
                     name="Live Prediction",
-                    hovertemplate="Live Prediction: %{y:.4f}<br>%{x}<extra></extra>",
+                    hovertemplate="Live Prediction: %{y:.6f} (" + "%{customdata:.2f}%)<br>Date: %{x}<extra></extra>",
+                    customdata=[live_pct],
                 )
             )
 
@@ -340,7 +398,6 @@ if "nonce" not in st.session_state:
 
 
 def init_data():
-    # Load symbols once at startup (and on refresh)
     stocks = api_get("/v1/stocks", {"_nonce": st.session_state["nonce"]})
     syms: List[str] = stocks.get("symbols", []) or []
     st.session_state["symbols"] = syms
@@ -360,24 +417,21 @@ with st.sidebar:
     st.header("Config")
     st.caption(f"API_BASE: {API_BASE}")
     st.caption(f"API_KEY loaded: {'yes' if bool(API_KEY) else 'no'}")
-    if COMPANY_MAP:
-        st.caption(f"company_map loaded: {len(COMPANY_MAP)}")
-    else:
-        st.caption("company_map loaded: 0")
+    st.caption(f"company_map loaded: {len(COMPANY_MAP)}")
 
     st.divider()
     st.header("Actions")
 
     colA, colB = st.columns(2)
     with colA:
-        if st.button("🔄 Refresh"):
+        if st.button("🔄 Refresh", help="Clears the frontend cache and reloads data from the backend."):
             st.cache_data.clear()
             st.session_state["nonce"] += 1
             init_data()
             st.rerun()
 
     with colB:
-        auto = st.toggle("Auto refresh", value=False, help="Refresh every 60s")
+        auto = st.toggle("Auto refresh", value=False, help="Automatically refresh the dashboard every 60 seconds.")
 
     if auto:
         st.caption("Auto refresh active (60s)")
@@ -387,7 +441,7 @@ with st.sidebar:
     st.header("Admin (optional)")
     st.caption("Nur wenn dein API Key im Backend als `:admin` gesetzt ist.")
 
-    if st.button("Run Ingest"):
+    if st.button("Run Ingest", help=TT["admin_ingest"]):
         res = api_post("/v1/admin/jobs/ingest")
         st.success(f"Return code: {res.get('returncode')}")
         st.code((res.get("stdout") or "")[-4000:] + "\n" + (res.get("stderr") or "")[-2000:])
@@ -396,7 +450,7 @@ with st.sidebar:
         init_data()
         st.rerun()
 
-    if st.button("Run Forecast"):
+    if st.button("Run Forecast", help=TT["admin_forecast"]):
         res = api_post("/v1/admin/jobs/forecast")
         st.success(f"Return code: {res.get('returncode')}")
         st.code((res.get("stdout") or "")[-4000:] + "\n" + (res.get("stderr") or "")[-2000:])
@@ -410,10 +464,8 @@ with st.sidebar:
 # Main
 # ------------------------------------------------------------------------------
 st.title("StonksAI – Volatility Forecast")
-
 symbols: List[str] = st.session_state.get("symbols", []) or []
 last_updated = st.session_state.get("last_updated")
-
 st.caption(f"Last updated: {last_updated}")
 
 if not symbols:
@@ -431,12 +483,14 @@ with tab1:
         symbols,
         key="symbol",
         format_func=symbol_label,
+        help=TT["select_stock"],
     )
 
     payload = api_get("/v1/forecast/latest", {"symbol": symbol, "_nonce": st.session_state["nonce"]})
     record = payload.get("record", {}) or {}
     derived = payload.get("derived", {}) or {}
 
+    # Core metrics
     pred_val = record.get("forecast_value")
     last_vol = record.get("last_known_vol")
     last_date = record.get("last_known_date")
@@ -453,17 +507,17 @@ with tab1:
     dpct = delta_percent(delta_abs, last_vol)
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Target date", tgt_date or "—")
-    c2.metric("Prediction (T+1)", fmt_float(pred_val, 6))
-    c3.metric("Risk", risk_badge(risk_label))
-    c4.metric("Δ vs last realized", fmt_pct(dpct, 1, delta_arrow))
+    c1.metric("Target date", tgt_date or "—", help=TT["target_date"])
+    c2.metric("Prediction (T+1)", fmt_vol_with_pct(pred_val, 6, 2), help=TT["prediction"])
+    c3.metric("Risk", risk_badge(risk_label), help=TT["risk"])
+    c4.metric("Δ vs last realized", fmt_pct(dpct, 1, delta_arrow), help=TT["delta"])
 
-    st.write(
-        f"Confidence band: {fmt_float(band_low, 6)} – {fmt_float(band_high, 6)}  \n"
-        f"Last known date: {last_date or '—'} | Last known EWMA vol: {fmt_float(last_vol, 6)}"
-    )
+    st.caption(f"Confidence band: {fmt_float(band_low, 6)} – {fmt_float(band_high, 6)}  |  {TT['conf_band']}")
+    st.caption(f"Last known date: {last_date or '—'}  |  Last known volatility: {fmt_vol_with_pct(last_vol, 6, 2)}  |  {TT['last_known']}")
 
     st.subheader("Prediction vs Actual (last 5 trading days) + Live Prediction")
+    st.caption(TT["chart"])
+
     bt_payload = api_get(
         "/v1/forecast/backtests",
         {"symbol": symbol, "days": 5, "_nonce": st.session_state["nonce"]},
@@ -471,6 +525,7 @@ with tab1:
     df_bt = sanitize_records_df(bt_payload.get("records", []))
 
     fig = build_prediction_vs_actual_figure(df_bt, symbol, live_pred=record if record else None)
+
     plot_key = f"pred_actual::{symbol}::{st.session_state['nonce']}::{len(df_bt)}"
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=plot_key)
 
@@ -479,6 +534,18 @@ with tab1:
 # ------------------------------------------------------------------------------
 with tab2:
     st.subheader("All symbols overview")
+    st.caption(TT["overview"])
+
+    with st.expander("ℹ️ Column explanations", expanded=False):
+        st.markdown(
+            """
+- **Company / symbol**: Display label and technical identifier used by the backend  
+- **Risk**: Volatility-based risk classification (Low / Medium / High)  
+- **Δ%**: Change vs last realized volatility (percentage)  
+- **Prediction**: Next trading day (T+1) forecasted volatility (raw + percent)  
+- **Target date**: Date the prediction applies to
+            """.strip()
+        )
 
     rows: List[Dict[str, Any]] = []
     for s in symbols:
@@ -494,9 +561,8 @@ with tab2:
                     "symbol": s,
                     "risk": risk_badge((d.get("risk", {}) or {}).get("label", "Medium")),
                     "Δ%": fmt_pct(dp, 1, d.get("delta_arrow")),
-                    "prediction": r.get("forecast_value"),
+                    "prediction": fmt_vol_with_pct(r.get("forecast_value"), 6, 2),
                     "target_date": r.get("target_date"),
-                    "last_vol": r.get("last_known_vol"),
                 }
             )
         except Exception:
@@ -504,8 +570,7 @@ with tab2:
 
     df = pd.DataFrame(rows)
     if not df.empty:
-        # nicer ordering
-        df = df[["company", "symbol", "risk", "Δ%", "prediction", "target_date", "last_vol"]]
+        df = df[["company", "symbol", "risk", "Δ%", "prediction", "target_date"]]
         df = df.sort_values(["company", "symbol"], na_position="last")
 
     st.dataframe(df, use_container_width=True, hide_index=True)
