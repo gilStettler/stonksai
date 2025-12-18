@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -17,6 +19,8 @@ PLOTLY_CONFIG = {"displayModeBar": False}
 # ------------------------------------------------------------------------------
 # Config (secrets first, then env, then default)
 # ------------------------------------------------------------------------------
+FRONTEND_DIR = Path(__file__).resolve().parent
+COMPANY_MAP_PATH = FRONTEND_DIR / "company_map.json"
 
 
 def _secret_get(key: str, default: Any = None) -> Any:
@@ -26,9 +30,6 @@ def _secret_get(key: str, default: Any = None) -> Any:
         return default
 
 
-# Prefer docker-safe env var first:
-# - Docker Compose: API_BASE_URL=http://backend:8000
-# - Local (no docker): API_BASE_URL=http://127.0.0.1:8000
 API_BASE = (
     _secret_get("API_BASE_URL")
     or _secret_get("API_BASE")
@@ -39,9 +40,6 @@ API_BASE = (
     or "http://127.0.0.1:8000"
 ).rstrip("/")
 
-# Token naming:
-# - VT_API_KEY in .env / docker compose
-# - alternatively API_KEY
 API_KEY = (
     _secret_get("VT_API_KEY")
     or _secret_get("API_KEY")
@@ -51,10 +49,40 @@ API_KEY = (
 ).strip()
 
 # ------------------------------------------------------------------------------
+# Company map (auto-load once at app start)
+# ------------------------------------------------------------------------------
+@st.cache_resource
+def load_company_map_cached(path: Path) -> Dict[str, str]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        cleaned: Dict[str, str] = {}
+        for k, v in (data or {}).items():
+            if v is None:
+                continue
+            name = str(v).strip().rstrip(",").strip()
+            cleaned[str(k).strip()] = name
+        return cleaned
+    except Exception:
+        return {}
+
+
+COMPANY_MAP = load_company_map_cached(COMPANY_MAP_PATH)
+
+
+def company_of(symbol: str) -> str:
+    return COMPANY_MAP.get(symbol, "")
+
+
+def symbol_label(symbol: str) -> str:
+    c = company_of(symbol)
+    return f"{c} ({symbol})" if c else symbol
+
+
+# ------------------------------------------------------------------------------
 # HTTP helpers
 # ------------------------------------------------------------------------------
-
-
 def _headers() -> Dict[str, str]:
     if not API_KEY:
         return {}
@@ -64,12 +92,12 @@ def _headers() -> Dict[str, str]:
 def _show_auth_error(status_code: int, body: str):
     st.error(
         f"🔒 Backend Auth fehlgeschlagen ({status_code}).\n\n"
-        f"**API_BASE:** `{API_BASE}`  \n"
-        f"**API_KEY geladen:** `{bool(API_KEY)}`\n\n"
+        f"API_BASE: `{API_BASE}`  \n"
+        f"API_KEY geladen: `{bool(API_KEY)}`\n\n"
         "Fix-Checklist:\n"
         "- Docker: Frontend ENV `VT_API_KEY` ist gesetzt (z.B. `vt_live_admin_123`)\n"
         "- Backend ENV `VT_API_KEYS` enthält genau diesen Key\n"
-        "- Frontend ruft in Docker `http://backend:8000` auf (nicht `localhost`)\n"
+        "- Docker: API_BASE_URL muss `http://backend:8000` sein (nicht `localhost`)\n"
     )
     if body:
         st.code(body[:2000])
@@ -79,11 +107,11 @@ def _show_auth_error(status_code: int, body: str):
 def _show_backend_down(err: Exception):
     st.error(
         "🚫 Backend nicht erreichbar.\n\n"
-        f"**API_BASE:** `{API_BASE}`\n\n"
+        f"API_BASE: `{API_BASE}`\n\n"
         "Typische Ursachen:\n"
         "- Backend läuft nicht\n"
         "- falscher Host/Port\n"
-        "- in Docker muss API_BASE z.B. `http://backend:8000` sein (nicht `localhost`)\n\n"
+        "- Docker: API_BASE_URL muss z.B. `http://backend:8000` sein (nicht `localhost`)\n\n"
         f"Fehler: `{type(err).__name__}: {err}`"
     )
     st.stop()
@@ -121,8 +149,6 @@ def api_post(path: str) -> Dict[str, Any]:
 # ------------------------------------------------------------------------------
 # Formatting helpers
 # ------------------------------------------------------------------------------
-
-
 def fmt_float(x: Any, nd: int = 4) -> str:
     if x is None:
         return "—"
@@ -172,8 +198,6 @@ def delta_percent(delta_abs: Any, base: Any) -> Optional[float]:
 # ------------------------------------------------------------------------------
 # DataFrame helpers
 # ------------------------------------------------------------------------------
-
-
 def sanitize_records_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
@@ -197,8 +221,6 @@ def filter_trading_days(df: pd.DataFrame, date_col: str = "target_date") -> pd.D
 # ------------------------------------------------------------------------------
 # Plot builder
 # ------------------------------------------------------------------------------
-
-
 def build_prediction_vs_actual_figure(
     df_bt: pd.DataFrame,
     symbol: str,
@@ -221,7 +243,7 @@ def build_prediction_vs_actual_figure(
         fig.update_layout(
             height=360,
             margin=dict(l=40, r=20, t=40, b=30),
-            title=dict(text=f"{symbol} – Prediction vs Actual (no data)", font=dict(size=14), x=0.01),
+            title=dict(text=f"{symbol_label(symbol)} – Prediction vs Actual (no data)", font=dict(size=14), x=0.01),
         )
         return fig
 
@@ -299,7 +321,7 @@ def build_prediction_vs_actual_figure(
         height=360,
         margin=dict(l=40, r=20, t=40, b=30),
         title=dict(
-            text=f"{symbol} – Prediction (T+1) vs Actual (last 5 trading days) + Live",
+            text=f"{symbol_label(symbol)} – Prediction (T+1) vs Actual (last 5 trading days) + Live",
             font=dict(size=14),
             x=0.01,
         ),
@@ -311,10 +333,25 @@ def build_prediction_vs_actual_figure(
 
 
 # ------------------------------------------------------------------------------
-# Session init
+# Auto-load data at startup
 # ------------------------------------------------------------------------------
 if "nonce" not in st.session_state:
     st.session_state["nonce"] = 0
+
+
+def init_data():
+    # Load symbols once at startup (and on refresh)
+    stocks = api_get("/v1/stocks", {"_nonce": st.session_state["nonce"]})
+    syms: List[str] = stocks.get("symbols", []) or []
+    st.session_state["symbols"] = syms
+    st.session_state["last_updated"] = stocks.get("last_updated")
+    if syms and "symbol" not in st.session_state:
+        st.session_state["symbol"] = syms[0]
+
+
+if "symbols" not in st.session_state:
+    init_data()
+
 
 # ------------------------------------------------------------------------------
 # Sidebar
@@ -323,6 +360,10 @@ with st.sidebar:
     st.header("Config")
     st.caption(f"API_BASE: {API_BASE}")
     st.caption(f"API_KEY loaded: {'yes' if bool(API_KEY) else 'no'}")
+    if COMPANY_MAP:
+        st.caption(f"company_map loaded: {len(COMPANY_MAP)}")
+    else:
+        st.caption("company_map loaded: 0")
 
     st.divider()
     st.header("Actions")
@@ -332,6 +373,7 @@ with st.sidebar:
         if st.button("🔄 Refresh"):
             st.cache_data.clear()
             st.session_state["nonce"] += 1
+            init_data()
             st.rerun()
 
     with colB:
@@ -351,6 +393,7 @@ with st.sidebar:
         st.code((res.get("stdout") or "")[-4000:] + "\n" + (res.get("stderr") or "")[-2000:])
         st.cache_data.clear()
         st.session_state["nonce"] += 1
+        init_data()
         st.rerun()
 
     if st.button("Run Forecast"):
@@ -359,6 +402,7 @@ with st.sidebar:
         st.code((res.get("stdout") or "")[-4000:] + "\n" + (res.get("stderr") or "")[-2000:])
         st.cache_data.clear()
         st.session_state["nonce"] += 1
+        init_data()
         st.rerun()
 
 
@@ -367,10 +411,8 @@ with st.sidebar:
 # ------------------------------------------------------------------------------
 st.title("StonksAI – Volatility Forecast")
 
-# Fetch list of stocks
-stocks = api_get("/v1/stocks", {"_nonce": st.session_state["nonce"]})
-symbols: List[str] = stocks.get("symbols", []) or []
-last_updated = stocks.get("last_updated")
+symbols: List[str] = st.session_state.get("symbols", []) or []
+last_updated = st.session_state.get("last_updated")
 
 st.caption(f"Last updated: {last_updated}")
 
@@ -384,20 +426,17 @@ tab1, tab2 = st.tabs(["📈 Dashboard", "🏁 Overview"])
 # Dashboard tab
 # ------------------------------------------------------------------------------
 with tab1:
-    symbol = st.selectbox("Stock", symbols, key="symbol_select")
-
-    # Force refresh when symbol changes
-    prev_symbol = st.session_state.get("_prev_symbol")
-    if prev_symbol and prev_symbol != symbol:
-        st.cache_data.clear()
-        st.session_state["nonce"] += 1
-    st.session_state["_prev_symbol"] = symbol
+    symbol = st.selectbox(
+        "Stock",
+        symbols,
+        key="symbol",
+        format_func=symbol_label,
+    )
 
     payload = api_get("/v1/forecast/latest", {"symbol": symbol, "_nonce": st.session_state["nonce"]})
     record = payload.get("record", {}) or {}
     derived = payload.get("derived", {}) or {}
 
-    # Core metrics
     pred_val = record.get("forecast_value")
     last_vol = record.get("last_known_vol")
     last_date = record.get("last_known_date")
@@ -420,11 +459,10 @@ with tab1:
     c4.metric("Δ vs last realized", fmt_pct(dpct, 1, delta_arrow))
 
     st.write(
-        f"**Confidence band:** {fmt_float(band_low, 6)} – {fmt_float(band_high, 6)}  \n"
-        f"**Last known date:** {last_date or '—'} | **Last known EWMA vol:** {fmt_float(last_vol, 6)}"
+        f"Confidence band: {fmt_float(band_low, 6)} – {fmt_float(band_high, 6)}  \n"
+        f"Last known date: {last_date or '—'} | Last known EWMA vol: {fmt_float(last_vol, 6)}"
     )
 
-    # Backtests (last 5 trading days)
     st.subheader("Prediction vs Actual (last 5 trading days) + Live Prediction")
     bt_payload = api_get(
         "/v1/forecast/backtests",
@@ -433,8 +471,6 @@ with tab1:
     df_bt = sanitize_records_df(bt_payload.get("records", []))
 
     fig = build_prediction_vs_actual_figure(df_bt, symbol, live_pred=record if record else None)
-
-    # Unique key forces Streamlit to re-render correctly
     plot_key = f"pred_actual::{symbol}::{st.session_state['nonce']}::{len(df_bt)}"
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=plot_key)
 
@@ -454,6 +490,7 @@ with tab2:
             dp = delta_percent(d.get("delta_vol"), r.get("last_known_vol"))
             rows.append(
                 {
+                    "company": company_of(s) or "",
                     "symbol": s,
                     "risk": risk_badge((d.get("risk", {}) or {}).get("label", "Medium")),
                     "Δ%": fmt_pct(dp, 1, d.get("delta_arrow")),
@@ -466,4 +503,9 @@ with tab2:
             continue
 
     df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True)
+    if not df.empty:
+        # nicer ordering
+        df = df[["company", "symbol", "risk", "Δ%", "prediction", "target_date", "last_vol"]]
+        df = df.sort_values(["company", "symbol"], na_position="last")
+
+    st.dataframe(df, use_container_width=True, hide_index=True)

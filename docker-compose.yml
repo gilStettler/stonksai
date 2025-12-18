@@ -7,7 +7,8 @@ services:
     env_file:
       - ./.env
     environment:
-      # Ensure the backend always has a default key (frontend uses this)
+      # Backend API keys (your backend reads VT_API_KEYS; keep VT_API_KEY for convenience too)
+      VT_API_KEYS: ${VT_API_KEYS:-vt_live_admin_123:admin}
       VT_API_KEY: ${VT_API_KEY:-vt_live_admin_123}
 
       # Ensure paths are container paths (override any local absolute paths from .env)
@@ -15,7 +16,11 @@ services:
       STOCK_CSV_DIR: ${STOCK_CSV_DIR:-jobs/data_csv}
       FORECAST_STORE_DIR: ${FORECAST_STORE_DIR:-jobs/data_out}
       LOCK_DIR: ${LOCK_DIR:-.locks}
-      PYTHON_BIN: /usr/local/bin/python
+      PYTHON_BIN: ${PYTHON_BIN:-/usr/local/bin/python}
+
+      # Optional
+      ENABLE_JOB_TRIGGERS: ${ENABLE_JOB_TRIGGERS:-1}
+      JOB_TRIGGER_TOKEN: ${JOB_TRIGGER_TOKEN:-}
       ENV: ${ENV:-local}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
@@ -39,8 +44,10 @@ services:
     env_file:
       - ./.env
     environment:
-      # Frontend calls backend via docker network name
-      API_BASE_URL: http://backend:8000
+      # IMPORTANT: Frontend must NOT use localhost inside Docker.
+      # Use service name "backend" on the compose network.
+      API_BASE_URL: ${API_BASE_URL:-http://backend:8000}
+      VT_BACKEND_URL: ${VT_BACKEND_URL:-http://backend:8000}
 
       # Frontend token (use admin key by default)
       VT_API_KEY: ${VT_API_KEY:-vt_live_admin_123}
