@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -85,16 +84,75 @@ def require_admin(user: Dict[str, str] = Depends(require_user)) -> Dict[str, str
 
 
 # =============================================================================
-# Helpers
+# Helpers (company-keyed history + symbol API)
 # =============================================================================
 def read_forecast_history() -> Dict[str, Any]:
     if not FORECAST_FILE.exists():
-        # initial empty structure
-        return {"last_updated": None, "data": {}}
+        return {"last_updated": None, "data": {}, "meta": {"company_to_symbol": {}}}
     try:
-        return json.loads(FORECAST_FILE.read_text())
+        data = json.loads(FORECAST_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {"last_updated": None, "data": {}, "meta": {"company_to_symbol": {}}}
+        data.setdefault("data", {})
+        data.setdefault("meta", {})
+        if not isinstance(data["meta"], dict):
+            data["meta"] = {}
+        data["meta"].setdefault("company_to_symbol", {})
+        if not isinstance(data["meta"]["company_to_symbol"], dict):
+            data["meta"]["company_to_symbol"] = {}
+        return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not read forecast_history.json: {e}")
+
+
+def _invert_company_map(data: Dict[str, Any]) -> Dict[str, str]:
+    """
+    meta.company_to_symbol: {company: symbol}  ->  {symbol: company}
+    """
+    m = (data.get("meta") or {}).get("company_to_symbol") or {}
+    out: Dict[str, str] = {}
+    if isinstance(m, dict):
+        for company, sym in m.items():
+            if not company or not sym:
+                continue
+            out[str(sym).strip()] = str(company).strip()
+    return out
+
+
+def _company_key_from_symbol(data: Dict[str, Any], symbol: str) -> Optional[str]:
+    sym_to_company = _invert_company_map(data)
+    return sym_to_company.get(symbol)
+
+
+def _records_for_symbol(data: Dict[str, Any], symbol: str) -> Optional[List[dict]]:
+    """
+    Forecast history is keyed by company_name in data[company].
+    Frontend calls backend with symbol -> resolve to company -> return records list.
+    """
+    company = _company_key_from_symbol(data, symbol)
+    if not company:
+        return None
+    rows = (data.get("data") or {}).get(company)
+    if not isinstance(rows, list) or not rows:
+        return None
+    return rows
+
+
+def _latest_record(rows: List[dict]) -> Optional[dict]:
+    """
+    Prefer latest live record (type == forecast_next_day).
+    """
+    if not rows:
+        return None
+    live = [r for r in rows if isinstance(r, dict) and r.get("type") == "forecast_next_day"]
+    if live:
+        live.sort(key=lambda r: (str(r.get("target_date", "")), str(r.get("generated_at", ""))))
+        return live[-1]
+    return rows[-1]
+
+
+def _backtest_records(rows: List[dict]) -> List[dict]:
+    return [r for r in rows if isinstance(r, dict) and r.get("type") == "backtest_next_day"]
 
 
 def run_job_sync(script: Path) -> Dict[str, Any]:
@@ -152,22 +210,19 @@ def health():
 @app.get("/v1/stocks")
 def list_stocks(_: Dict[str, str] = Depends(require_user)):
     """
-    Preferred: use forecast_history.json as source of truth (symbols actually available).
-    Fallback: list CSVs if forecast file doesn't exist yet.
+    Source of truth: meta.company_to_symbol -> return symbols (frontend dropdown uses symbols).
     """
     data = read_forecast_history()
-    symbols = sorted((data.get("data") or {}).keys())
+
+    sym_to_company = _invert_company_map(data)
+    symbols = sorted(sym_to_company.keys())
 
     if symbols:
         return {"symbols": symbols, "last_updated": data.get("last_updated")}
 
-    # fallback to CSVs if no forecasts yet
-    if STOCK_CSV_DIR.exists():
-        csv_symbols = sorted(p.stem for p in STOCK_CSV_DIR.glob("*.csv"))
-    else:
-        csv_symbols = []
-
-    return {"symbols": csv_symbols, "last_updated": data.get("last_updated")}
+    # fallback (if meta missing): best-effort legacy
+    legacy_keys = sorted((data.get("data") or {}).keys())
+    return {"symbols": legacy_keys, "last_updated": data.get("last_updated")}
 
 
 # =============================================================================
@@ -176,13 +231,19 @@ def list_stocks(_: Dict[str, str] = Depends(require_user)):
 @app.get("/v1/forecast/latest")
 def forecast_latest(symbol: str, _: Dict[str, str] = Depends(require_user)):
     data = read_forecast_history()
-    rows = (data.get("data") or {}).get(symbol)
+    rows = _records_for_symbol(data, symbol)
+
+    # legacy fallback: if file is symbol-keyed
+    if not rows:
+        rows = (data.get("data") or {}).get(symbol)
+
     if not rows:
         raise HTTPException(status_code=404, detail=f"No forecast for symbol: {symbol}")
 
-    latest = rows[-1]
+    latest = _latest_record(rows) if isinstance(rows, list) else None
+    if not latest:
+        raise HTTPException(status_code=404, detail=f"No latest record for symbol: {symbol}")
 
-    # optional derived metrics (safe)
     try:
         derived = derive_metrics(
             symbol=symbol,
@@ -208,7 +269,12 @@ def forecast_latest(symbol: str, _: Dict[str, str] = Depends(require_user)):
 @app.get("/v1/forecast/history")
 def forecast_history(symbol: str, _: Dict[str, str] = Depends(require_user)):
     data = read_forecast_history()
-    rows = (data.get("data") or {}).get(symbol)
+    rows = _records_for_symbol(data, symbol)
+
+    # legacy fallback
+    if not rows:
+        rows = (data.get("data") or {}).get(symbol)
+
     if not rows:
         raise HTTPException(status_code=404, detail=f"No history for symbol: {symbol}")
 
@@ -221,15 +287,24 @@ def forecast_history(symbol: str, _: Dict[str, str] = Depends(require_user)):
 @app.get("/v1/forecast/backtests")
 def forecast_backtests(symbol: str, days: int = 5, _: Dict[str, str] = Depends(require_user)):
     data = read_forecast_history()
-    rows = (data.get("data") or {}).get(symbol)
+    rows = _records_for_symbol(data, symbol)
+
+    # legacy fallback
+    if not rows:
+        rows = (data.get("data") or {}).get(symbol)
+
     if not rows:
         raise HTTPException(status_code=404, detail=f"No history for symbol: {symbol}")
 
     days = max(1, min(int(days), 120))
+
+    bt = _backtest_records(rows)
+    bt.sort(key=lambda r: (str(r.get("target_date", "")), str(r.get("generated_at", ""))))
+
     return {
         "symbol": symbol,
         "days": days,
-        "records": rows[-days:],
+        "records": bt[-days:],
         "last_updated": data.get("last_updated"),
     }
 

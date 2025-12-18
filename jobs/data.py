@@ -7,7 +7,7 @@ Data Ingestion Job
 - Fetches VIX data from Yahoo Finance
 - Merges stock data with VIX
 - Writes:
-  - snapshots -> jobs/data_csv/snapshots/
+  - snapshots -> jobs/data_csv/snapshots/YYYY-MM-DD/   (yesterday)
   - latest    -> jobs/data_csv/latest/
 
 Triggered:
@@ -21,7 +21,7 @@ import shutil
 import argparse
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import yfinance as yf
 
@@ -121,6 +121,15 @@ def atomic_copy_to_latest(src_path: Path, dst_dir: Path) -> Path:
     return final
 
 
+def get_snapshot_day_dir(base_snapshot_dir: Path, day: str) -> Path:
+    """
+    Returns snapshots/<YYYY-MM-DD>/ and ensures it exists.
+    """
+    day_dir = base_snapshot_dir / day
+    day_dir.mkdir(parents=True, exist_ok=True)
+    return day_dir
+
+
 def get_vix_from_yfinance(period: str = "max") -> pd.DataFrame:
     print("[vix] Fetching VIX from Yahoo Finance (^VIX)...")
     vix = yf.Ticker("^VIX")
@@ -187,12 +196,17 @@ def main():
             "[FATAL] Missing ALPHAVANTAGE_API_KEY (set it in .env)"
         )
 
+    # ✅ snapshots should be stored under yesterday's date
+    run_day = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    day_snapshot_dir = get_snapshot_day_dir(SNAPSHOT_DIR, run_day)
+
     print("=" * 60)
     print("DATA INGESTION JOB")
     print("=" * 60)
-    print(f"[out] BASE_DIR:     {DATA_CSV_BASE_DIR}")
-    print(f"[out] LATEST_DIR:   {LATEST_DIR}")
-    print(f"[out] SNAPSHOT_DIR: {SNAPSHOT_DIR}")
+    print(f"[out] BASE_DIR:         {DATA_CSV_BASE_DIR}")
+    print(f"[out] LATEST_DIR:       {LATEST_DIR}")
+    print(f"[out] SNAPSHOT_DIR:     {SNAPSHOT_DIR}")
+    print(f"[out] DAY_SNAPSHOT_DIR: {day_snapshot_dir}")
     print(f"[tickers] {len(TICKERS)}")
     print(f"[rate] sleep {SLEEP_SECONDS}s")
 
@@ -208,10 +222,13 @@ def main():
             merged = stock_df.join(vix_df, how="left")
 
             fname = f"data_{safe_filename(symbol)}.csv"
-            snapshot_path = SNAPSHOT_DIR / fname
+
+            # ✅ Snapshot in yesterday folder
+            snapshot_path = day_snapshot_dir / fname
             merged.to_csv(snapshot_path, index_label="timestamp")
             print(f"[ok] snapshot {snapshot_path}")
 
+            # ✅ Latest as before
             latest_path = atomic_copy_to_latest(snapshot_path, LATEST_DIR)
             print(f"[ok] latest   {latest_path}")
 
